@@ -26,6 +26,51 @@ docker compose run --rm app npm run check
 Если порт 5173 занят, создайте `.env` по шаблону ниже и добавьте `PORT=8080`,
 после чего приложение будет доступно на http://127.0.0.1:8080.
 
+### На сервере за nginx
+
+Контейнер публикуется только на `127.0.0.1` и сам поднимается после сбоя или
+перезагрузки сервера (`restart: unless-stopped`); наружу сайт отдаёт nginx.
+Кэш, импортированные архивы и файлы SpacePy лежат в `local/` на хосте и
+переживают пересборку образа. Команды `docker` выполняются от root или от
+пользователя из группы `docker`.
+
+1. Нужен Docker Engine с плагином Compose: `docker compose version`. В Ubuntu:
+   `sudo apt install docker.io docker-compose-v2`.
+2. Если приложение раньше работало как служба systemd, остановите её, иначе
+   порт будет занят: `sudo systemctl disable --now cosmohack.service`. Папка
+   `local/` подхватывается как есть: кэш — `local/pipeline`, SpacePy —
+   `local/spacepy`.
+3. Из корня репозитория соберите образ и запустите контейнер:
+
+   ```sh
+   docker compose up -d --build
+   ```
+
+   Первая сборка занимает 5–10 минут: компилируется IRBEM. Нужно около 4 ГБ
+   на диске и не меньше 2 ГБ памяти.
+4. Проверьте: `docker compose ps`, `docker compose logs -f app` и
+   `curl -I http://127.0.0.1:5173/`.
+5. nginx проксирует на контейнер и передаёт заголовок `Host`: без него API
+   отвечает 403 (проверка `Origin`). Расчёт с загрузкой источников может идти
+   дольше минуты, поэтому таймаут увеличен:
+
+   ```nginx
+   location / {
+       proxy_pass http://127.0.0.1:5173;
+       proxy_set_header Host $host;
+       proxy_read_timeout 180s;
+   }
+   ```
+
+6. Обновление: `git pull && docker compose up -d --build`.
+
+Разовые команды выполняются в том же образе, результат остаётся в `local/`:
+
+```sh
+docker compose run --rm app python pipeline/goes_history.py --from 2024-05-01 --to 2024-06-30
+docker compose run --rm app npm run pipeline:import -- records local/goes-history.json
+```
+
 ## Локальный запуск без Docker
 
 Нужен Node.js 20+.

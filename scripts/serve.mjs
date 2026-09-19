@@ -6,6 +6,8 @@ import { collect, buildDataset } from '../pipeline/build.mjs';
 import { validateRequest } from '../dist/domain.js';
 const cache=new Cache(process.env.PIPELINE_CACHE||'local/pipeline');
 const root = resolve('dist');
+// Docker sets HOST=0.0.0.0: inside a container 127.0.0.1 is unreachable through a published port.
+const port=Number(process.env.PORT||5173),host=process.env.HOST||'127.0.0.1';
 const types = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.svg':'image/svg+xml', '.json':'application/json' };
 http.createServer(async(req,res) => {
   try {
@@ -27,5 +29,4 @@ http.createServer(async(req,res) => {
     const body = await readFile(path);
     res.writeHead(200,{'Content-Type':types[extname(path)] || 'application/octet-stream','Cache-Control':'no-cache'}); res.end(body);
   } catch(e) { res.writeHead(req.method==='POST'?500:404,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:req.method==='POST'?e.message:'Not found'})); }
-const port=Number(process.env.PORT||5173),host=process.env.HOST||'127.0.0.1';
 }).listen(port, host, () => console.log(`Local: http://${host}:${port}`));

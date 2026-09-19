@@ -1,8 +1,13 @@
 services:
   app:
     build: .
+    # Back up after a crash or a server reboot; tini forwards stop signals to Node.
+    restart: unless-stopped
+    init: true
+    # Loopback by default: Docker bypasses ufw, and nginx publishes the site anyway.
+    # BIND_ADDRESS=0.0.0.0 in .env opens the port to the network without a proxy.
     ports:
-      - "${PORT:-5173}:5173"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-5173}:5173"
     environment:
       HOST: 0.0.0.0
       PORT: 5173
