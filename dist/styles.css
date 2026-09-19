@@ -27,3 +27,21 @@
 .draft-banner{font-size:13px;color:#a17e4c;background:#fff8ec;border:1px solid #efe3ca;padding:13px 18px;border-radius:6px;margin-bottom:18px;line-height:1.7}
 
 .pipeline-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:24px;margin-bottom:24px}.pipeline-summary{padding:24px;margin-bottom:24px;min-width:0}.pipeline-summary td{vertical-align:top}.pipeline-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}.pipeline-summary small{display:block;max-width:420px;overflow-wrap:anywhere}.pipeline-summary li{margin:8px 0}.pipeline-summary a{color:inherit}@media(max-width:900px){.pipeline-grid{grid-template-columns:1fr}}
+.good-bar{background:#e3f1e7;border-color:#c3dccb;color:#5f8a6d}
+.storm-bar{height:18px;top:13px;background:#f6e0cc;border-color:#e8c4a3;color:#a8764a}
+.saa-bar{height:18px;top:13px;padding:0;font-size:0;background:#ebe4f5;border-color:#d6c9ea}
+.forecast-bar{top:34px;height:4px;padding:0;font-size:0;border:0;background:repeating-linear-gradient(90deg,#b7c3d2 0,#b7c3d2 4px,transparent 4px,transparent 7px)}
+.legend-color.green{background:#9fcdb0}
+.legend-color.dashed{background:repeating-linear-gradient(90deg,#9aa8ba 0,#9aa8ba 2px,transparent 2px,transparent 4px)}
+.window-chips{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 18px}
+.window-chip{font:inherit;text-align:left;border:1px solid #e3e7ee;background:#fff;border-radius:6px;padding:9px 11px;color:#4d5b6e;cursor:pointer;max-width:100%}
+.window-chip strong{font-size:13px;font-weight:600}
+.window-chip small{display:block;margin-top:3px;color:#8c97a7;font-size:12px}
+.window-chip.good{border-color:#c3dccb;background:#f3faf5}
+.window-chip.selected{box-shadow:0 0 0 2px #9dbbe3}
+.candidates-table{min-width:760px}
+.candidates-table td{padding-top:10px;padding-bottom:10px;white-space:nowrap}
+.candidates-table tr.good td:first-child{box-shadow:inset 3px 0 0 #8cc39c}
+.candidates-table tr.selected td{background:#f5f8fd}
+.candidates-table .text-button{color:#4d5b6e;font-weight:500}
+.notice-bar{height:16px;top:14px;width:auto;padding:0 3px;font-size:10px;line-height:14px;background:#e9eef5;border-color:#cfd9e6;color:#6d7f96}

@@ -4,7 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {validateRecord} from './quality.mjs';
 const hash=x=>createHash('sha256').update(x).digest('hex');
 export class Cache {
-  constructor(root='local/pipeline',fetcher=fetch){this.root=resolve(root);this.fetcher=fetcher;this.pending=new Map();}
+  constructor(root='local/pipeline',fetcher=fetch){this.root=resolve(root);this.fetcher=fetcher;this.pending=new Map();this.parsed=new Map();}
   async read(path,fallback){try{return JSON.parse(await readFile(join(this.root,path),'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}}
   async write(path,value){const file=join(this.root,path);await mkdir(resolve(file,'..'),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify(value));await rename(temp,file);}
   async fetch(sourceId,url,ttlMinutes){
@@ -26,5 +26,7 @@ export class Cache {
     } catch(e){await this.write(`requests/${key}.json`,{attemptedAt,error:e.message});throw e;}
   }
   async append(records){for(const r of records)validateRecord(r);if(records.length)await this.write(`records/${hash(JSON.stringify(records))}.json`,records);}
-  async records(){const folder=join(this.root,'records');let names;try{names=await readdir(folder);}catch(e){if(e.code==='ENOENT')return [];throw e;}return (await Promise.all(names.filter(x=>x.endsWith('.json')).map(n=>this.read(`records/${n}`,[])))).flat();}
+  // Record files are content-addressed and never rewritten: each is parsed once per process,
+  // so a large imported archive does not slow down every request.
+  async records(){const folder=join(this.root,'records');let names;try{names=await readdir(folder);}catch(e){if(e.code==='ENOENT')return [];throw e;}return (await Promise.all(names.filter(x=>x.endsWith('.json')).map(async n=>{if(!this.parsed.has(n))this.parsed.set(n,await this.read(`records/${n}`,[]));return this.parsed.get(n);}))).flat();}
 }

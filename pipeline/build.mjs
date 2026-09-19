@@ -1,5 +1,5 @@
 import {readFile} from 'node:fs/promises';
-import {SOURCES,goes,hp30,hp30Forecast,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
+import {SOURCES,DOCKED_MAX_RELATIVE_KMS,goes,hp30,hp30Forecast,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
 import {normalizeSeries,selectVersions,valueAt,coverageOf,validateMeteorTable,ms,iso} from './quality.mjs';
 import {orbitProfile,magneticProfile,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from './orbit.mjs';
 import {validateRequest,HOUR} from '../dist/domain.js';
@@ -41,14 +41,22 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
   const lastSample=Object.fromEntries(instruments.map(i=>[i,Math.max(...protons.filter(s=>s.instrument===i).flatMap(s=>s.samples.filter(x=>x.q==='ok').map(x=>x.t)))]));
   const persistence=request.mode==='current'?rules.sep.persistence.maxHours*HOUR:0;
   const forecasts=request.mode==='current'?visible.filter(r=>r.quantity==='hp30_forecast'&&Number.isFinite(r.value)).sort((a,b)=>ms(b.measuredAt)-ms(a.measuredAt)):[];
+  // SOCRATES screens the next days from its run: the latest snapshot bounds the screened span.
+  // Records cached before the adapter filtered docked vehicles are dropped here as well.
+  const conjunctions=visible.filter(r=>r.quantity==='conjunction'&&r.objectId===25544&&Number.isFinite(r.start)&&Number.isFinite(r.end)&&Number.isFinite(r.value)&&!(Number(r.payload?.TCA_RELATIVE_SPEED)<DOCKED_MAX_RELATIVE_KMS));
+  const screenedAt=request.mode==='current'?Math.max(-Infinity,...outcomes.filter(o=>o.id==='celestrak.socrates'&&o.ok).map(o=>ms(o.fetchedAt)),...conjunctions.map(r=>ms(r.measuredAt))):-Infinity;
+  const screenedUntil=screenedAt+rules.ops.screenHorizonDays*86400000;
   for(const p of profile.samples){
-    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,hp30Forecast:null,L:null,B:null,magLat:null,rc:null,ec:null,cutoff:null,saa:null,sep:null,sepBasis:null,sepBound:null,sepObservedAt:null,trapped:null,gcr:null,meteor:null});
+    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,hp30Forecast:null,L:null,B:null,magLat:null,rc:null,ec:null,cutoff:null,saa:null,sep:null,sepBasis:null,sepBound:null,sepObservedAt:null,trapped:null,gcr:null,meteor:null,ops:null});
     if(p.hp30===null)p.hp30Forecast=forecasts.find(r=>r.start<=p.t&&p.t<r.end)?.value??null;
     if(m&&p.lat!==null){p.L=m.L;p.B=m.B;p.magLat=m.magLat??null;p.ap8Min=m.ap8Min;p.ap8Max=m.ap8Max;p.ap8Floor=m.ap8Floor??null;p.saa=Number.isFinite(m.B)&&Number.isFinite(m.L)?m.B<rules.saa.maxBNt&&m.L<rules.saa.maxL:null;
       if(Number.isFinite(m.ap8Max)&&Number.isFinite(m.ap8Min)&&m.ap8Max>=0&&m.ap8Min>=0)p.trapped=Math.max(m.ap8Min,m.ap8Max);
       const shield=cutoffRigidity(p.magLat,p.alt,p.hp30??p.hp30Forecast,rules.cutoff);
-      if(shield){p.rc=shield.rc;p.ec=cutoffEnergy(shield.rc);p.cutoff=shield.storm?'storm':'quiet';}
+      if(shield){p.rc=shield.rc;p.ec=cutoffEnergy(shield.rc);p.cutoff=shield.storm?'storm':'quiet';
+        // GCR proxy: share of the interplanetary integral spectrum above the local cutoff.
+        p.gcr=(1+p.rc/rules.gcr.r0GV)**-rules.gcr.gamma;}
     }
+    if(p.t>=screenedAt&&p.t<=screenedUntil)p.ops=conjunctions.filter(r=>r.start<=p.t&&p.t<r.end).length;
     let basis='observation',observedAt=p.t,spectra=instruments.map(i=>spectrumAt(i,p.t)).filter(c=>c.some(x=>x.value!==null));
     if(!spectra.length&&persistence){
       const recent=instruments.filter(i=>p.t>lastSample[i]&&p.t-lastSample[i]<=persistence);
@@ -93,13 +101,13 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
     if(open!==null)gaps.push({factor,sourceId,start:open,end,publishedAt:null,reason});
   }
   // SOCRATES is a top-N sample: even a successful empty response cannot prove full coverage.
-  const events=visible.filter(r=>r.quantity==='conjunction'&&r.objectId===25544&&Number.isFinite(r.start)&&Number.isFinite(r.end)&&Number.isFinite(r.value)&&r.start<end&&r.end>start).map((r,i)=>({id:`ops-${i}`,title:'Сближение со станцией',type:'TCA',factor:'ops',sourceId:r.sourceId,objectId:25544,start:r.start,end:r.end,tca:r.tca,measuredAt:r.measuredAt,publishedAt:r.publishedAt,value:r.value,unit:r.unit,provenance:r.provenance,origin:'Внешний прогноз',version:r.sourceVersion,rule:'OPS-01: TCA ± 30 минут; возможен манёвр станции',limitation:'SOCRATES top-N не является полным экраном сближений'}));
+  const events=conjunctions.filter(r=>r.start<end&&r.end>start).map((r,i)=>({id:`ops-${i}`,title:'Сближение со станцией',type:'TCA',factor:'ops',sourceId:r.sourceId,objectId:25544,start:r.start,end:r.end,tca:r.tca,measuredAt:r.measuredAt,publishedAt:r.publishedAt,value:r.value,unit:r.unit,provenance:r.provenance,origin:'Внешний прогноз',version:r.sourceVersion,rule:'OPS-01: TCA ± 30 минут; возможен манёвр станции',limitation:'SOCRATES top-N не является полным экраном сближений'}));
   return {schemaVersion:2,demo:false,generatedAt,sources,series,profile,factors:FACTORS,events,gaps,coverage,rules,orbit:{epoch:profile.epoch,model:profile.propagator,format:'OMM',objectId:25544},context:visible.filter(r=>['notification','bulletin'].includes(r.quantity)),limitations:[
     'Исследовательские прокси, не расчёт дозы и не допуск к ВКД.',rules.cutoff.limitation,
     `SEP: интегральный поток GOES выше max(Ec, ${rules.suitEnergyMeV} МэВ). Спектр не экстраполируется: выше последнего канала и без геомагнитного индекса берётся верхняя оценка.`,
     ...(persistence?[`После последнего замера GOES — базовый прогноз «последнее наблюдение сохраняется» (до ${rules.sep.persistence.maxHours} ч): начало события он не предсказывает; для будущих часов обрезание по прогнозу Hp30 GFZ.`]:[]),
     'AP-8 — климатологическая модель; ниже нижнего уровня карты (1 см⁻²с⁻¹) поток равен 0; граница ЮАА исследовательская.',
-    'ГКЛ и сближения — контекст: не блокируют выбор окна. NMDB — наземный контекст, модели ГКЛ вдоль орбиты нет; SOCRATES top-N не доказывает отсутствие сближений.',
+    `ГКЛ — относительный прокси: доля межпланетного потока выше обрезания, солнечная модуляция не учтена (её показывает NMDB). Сближения — экран SOCRATES top-N на ${rules.ops.screenHorizonDays} сут; пристыкованные корабли исключены, отсутствие находок не доказывает отсутствие сближений. Оба механизма — контекст: выбор окна не блокируют.`,
     'Метеороиды: фон по модели Грюна с поправками на Землю × граница усиления потоков NASA MEO; окна Геминид не оцениваются.',
     ...(magnetic.error?[magnetic.error]:[])
   ]};
