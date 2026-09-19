@@ -142,9 +142,5 @@ export function assessV2(request,data){
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-<<<<<<< Updated upstream
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.4.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
-=======
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.3.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
->>>>>>> Stashed changes
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.4.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }
