@@ -50,12 +50,21 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
     request.mode==='current'?'Окно целиком до последнего замера GOES: поток измерен, прогноз не использовался':'Поток в окне измерен, прогноз не нужен');
   else{
     const since=Math.min(...persisted.map(p=>p.sepObservedAt).filter(finite)),probabilities=persisted.map(p=>p.sepEventProbability);
-    const known=probabilities.every(finite),peak=known?Math.max(...probabilities):null,limit=data.rules.confidence?.sepForecastMaxPercent;
-    // The baseline forecast is capped at 2 even when SWPC agrees: persistence cannot predict an onset.
-    const score=known?(finite(limit)&&peak<=limit?2:1):0;
+    const covered=probabilities.filter(finite),peak=covered.length?Math.max(...covered):null,limit=data.rules.confidence?.sepForecastMaxPercent;
+    // Confirmation is graded, not all-or-nothing: a forecast horizon that ends inside the window
+    // leaves the tail unconfirmed (1) instead of erasing the confirmation of the rest (0).
+    const full=covered.length===probabilities.length,warned=persisted.some(p=>p.sepWarning===true);
+    // Capped at 2 even when SWPC agrees: persistence cannot predict an onset.
+    const score=!covered.length?0:full&&!warned&&finite(limit)&&peak<=limit?2:1;
+    const state=!covered.length?'Прогноза SWPC на эти часы нет, подтвердить базовый прогноз нечем'
+      :warned?`Действует предупреждение SWPC о протонном событии — базовый прогноз «как сейчас» этим и опровергается${finite(peak)?`; вероятность бури S1+ до ${peak} %`:''}`
+      :`SWPC независимо оценивает вероятность бури S1+ до ${peak} %${!full?`, но прогноз покрывает только ${minutes(covered.length)} мин из ${minutes(persisted.length)} — хвост окна выходит за горизонт выпуска`:finite(limit)&&peak<=limit?' — прогноз подтверждён':` — это выше допустимых ${limit} %`}`;
     add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',score,
-      `${minutes(persisted.length)} мин окна после последнего замера GOES${finite(since)?` (${hhmm(since)} UTC)`:''} достроены базовым прогнозом «последнее наблюдение сохраняется». ${known?`SWPC независимо оценивает вероятность бури S1+ в эти сутки до ${peak} %${score===1&&finite(limit)?` — это выше допустимых ${limit} %`:' — прогноз подтверждён'}`:'Прогноза SWPC на эти сутки нет, подтвердить прогноз нечем'}`,
-      score===2?`Выше 2 из ${SCORE_MAX} такое окно не поднимается: начало события прогноз «как сейчас» не предсказывает (справочник, §6.4). Пересчитайте ближе к выходу — каждый замер GOES сокращает прогнозную часть, а окно целиком в прошлом получает 4`:known?'SWPC допускает радиационную бурю: пересчитайте ближе к выходу и следите за уведомлениями DONKI':'Обновите данные: SWPC выпускает прогноз на 3 суток в 00:30 и 12:30 UTC');
+      `${minutes(persisted.length)} мин окна после последнего замера GOES${finite(since)?` (${hhmm(since)} UTC)`:''} достроены базовым прогнозом «последнее наблюдение сохраняется». ${state}`,
+      score===2?`Выше 2 из ${SCORE_MAX} такое окно не поднимается: начало события прогноз «как сейчас» не предсказывает (справочник, §6.4). Пересчитайте ближе к выходу — каждый замер GOES сокращает прогнозную часть, а окно целиком в прошлом получает 4`
+      :warned?'Пока предупреждение в силе, переносить выход в эти часы нельзя обосновать прогнозом: дождитесь SUMPX об окончании события'
+      :covered.length?'Возьмите окно ближе к текущему моменту: прогноз SWPC на 3 суток от выпуска, дальше его горизонта подтверждения нет'
+      :'Обновите данные: SWPC выпускает прогноз на 3 суток в 00:30 и 12:30 UTC, резервный JSON solar_probabilities — раз в сутки');
   }
   const storm=points.filter(p=>p.cutoff==='storm').length,bounded=points.filter(p=>p.sepBound).length,index=data.rules.cutoff?.storm?.indexThreshold??5;
   add('model','Применимость моделей','Работают ли модели обрезания и потока в своей области применимости',storm?2:bounded?3:4,
@@ -123,5 +132,5 @@ export function assessV2(request,data){
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.3.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.4.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }

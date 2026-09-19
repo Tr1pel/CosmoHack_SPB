@@ -6,6 +6,8 @@ export const SOURCES=[
   {id:'gfz.hp30',name:'GFZ Hp30',url:'https://kp.gfz.de/app/json/',cadenceMinutes:30,factors:['sep'],modes:['current','history'],detail:'Hp30; смешанные ревизии, без времени публикации'},
   {id:'gfz.hp30.forecast',name:'GFZ Hp30 forecast',url:'https://spaceweather.gfz.de/fileadmin/SW-Monitor/hp30_product_file_FORECAST_HP30_SWIFT_DRIVEN_LAST.json',cadenceMinutes:60,factors:['sep'],modes:['current'],detail:'Ансамблевый прогноз Hp30 на 3 суток; для обрезания берётся максимум ансамбля'},
   {id:'noaa.swpc.forecast',name:'NOAA SWPC 3-day forecast',url:'https://services.swpc.noaa.gov/text/3-day-forecast.txt',cadenceMinutes:720,factors:['sep'],modes:['current'],detail:'Вероятность радиационной бури S1+ (≥ 10 pfu при ≥ 10 МэВ) по суткам на 3 суток; время выпуска из заголовка'},
+  {id:'noaa.swpc.probabilities',name:'NOAA SWPC solar probabilities',url:'https://services.swpc.noaa.gov/json/solar_probabilities.json',cadenceMinutes:1440,factors:['sep'],modes:['current'],detail:'Та же вероятность протонного события ≥ 10 МэВ в JSON, 31 сутки истории; время выпуска в продукте не указано — резерв текстового прогноза'},
+  {id:'noaa.swpc.alerts',name:'NOAA SWPC alerts',url:'https://services.swpc.noaa.gov/products/alerts.json',cadenceMinutes:30,factors:['sep'],modes:['current'],detail:'Датированные предупреждения SWPC, окно ~30 суток: WARPX/ALTPX/SUMPX по протонам ≥ 10 и ≥ 100 МэВ со сроком действия'},
   {id:'celestrak.gp',name:'CelesTrak GP',url:'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=json',cadenceMinutes:120,factors:['orbit'],modes:['current'],detail:'NORAD 25544; EPOCH не является публикацией'},
   {id:'spacetrack.history',name:'Space-Track GP history',url:'https://www.space-track.org/',cadenceMinutes:480,factors:['orbit'],modes:['history'],detail:'Однократный локальный импорт OMM с CREATION_DATE'},
   {id:'nmdb',name:'NMDB OULU / ROME',url:'https://www.nmdb.eu/nest/draw_graph.php',cadenceMinutes:60,factors:['gcr'],modes:['current','history'],detail:'Нейтронные мониторы; фон на Земле, не поток у МКС'},
@@ -64,6 +66,40 @@ export function swpcForecast(snapshot){
     // The year is the one that puts the day next to the issue date: forecasts cross New Year.
     const start=[-1,0,1].map(k=>Date.UTC(+issued[1]+k,month(m),+d)).sort((a,b)=>Math.abs(a-publishedAt)-Math.abs(b-publishedAt))[0];
     return record(snapshot,{seriesId:'swpc.s1.probability',instrument:'SWPC',recordId:`${iso(publishedAt)}/${iso(start).slice(0,10)}`,measuredAt:iso(publishedAt),publishedAt:iso(publishedAt),quantity:'sep_event_probability',unit:'%',provenance:'external_forecast',start,end:start+86400000,value:values[i],payload:{issued:iso(publishedAt),day:iso(start).slice(0,10),line:row.trim()}});
+  });
+}
+// SWPC daily probabilities, the JSON twin of the text 3-day forecast: the record dated D carries
+// the probability of a >= 10 MeV proton event for D, D+1 and D+2. The product states no issue
+// time, so publishedAt stays null and this source is a current-mode fallback, never a replay one.
+export function swpcProbabilities(snapshot){
+  const rows=JSON.parse(snapshot.raw);
+  if(!Array.isArray(rows)||!rows.length||!('10mev_protons_1_day' in rows[0]))throw new Error('SWPC solar probabilities schema changed');
+  return rows.flatMap(r=>{
+    const day=Date.parse(`${r.date.replace(' ','T').slice(0,19)}Z`);
+    if(!Number.isFinite(day))throw new Error('SWPC solar probabilities date format changed');
+    return [1,2,3].map(n=>({n,value:r[`10mev_protons_${n}_day`]})).filter(x=>Number.isFinite(x.value)).map(({n,value})=>{
+      const start=day+(n-1)*86400000;
+      return record(snapshot,{seriesId:'swpc.protons.probability',instrument:'SWPC',recordId:`${iso(day).slice(0,10)}/${iso(start).slice(0,10)}`,measuredAt:iso(day),quantity:'sep_event_probability',unit:'%',provenance:'external_forecast',start,end:start+86400000,value,payload:{issuedFor:iso(day).slice(0,10),day:n,polarCapAbsorption:r.polar_cap_absorption}});
+    });
+  });
+}
+// SWPC alerts carry a real issue time. The proton products also carry their own validity window,
+// so the moment of publication and the period the warning covers stay separate, as the task asks.
+const ALERT_TIME=/(\d{4})\s+(\w{3})\s+(\d{1,2})\s+(\d{2})(\d{2})\s*UTC/i;
+const alertTime=text=>{const m=text?.match(ALERT_TIME);if(!m)return null;const mon=MONTHS.indexOf(m[2].toLowerCase());return mon<0?null:Date.UTC(+m[1],mon,+m[3],+m[4],+m[5]);};
+export const PROTON_ALERTS=/^(WAR|ALT|SUM)P[XC]/i;
+export function swpcAlerts(snapshot){
+  const rows=JSON.parse(snapshot.raw);
+  if(!Array.isArray(rows)||!rows.length||!('issue_datetime' in rows[0]))throw new Error('SWPC alerts schema changed');
+  return rows.map(r=>{
+    const publishedAt=dateUTC(r.issue_datetime);
+    const code=r.message?.match(/Space Weather Message Code:\s*(\w+)/i)?.[1]??r.product_id;
+    const base={seriesId:'swpc.alerts',instrument:'SWPC',recordId:`${code}/${r.message?.match(/Serial Number:\s*(\d+)/i)?.[1]??publishedAt}`,measuredAt:publishedAt,publishedAt,provenance:'external_forecast',payload:{productId:r.product_id,code,message:r.message}};
+    if(!PROTON_ALERTS.test(code))return record(snapshot,{...base,quantity:'bulletin'});
+    // SUMPX/SUMPC summarise a finished event; only warnings and alerts bound a period still ahead.
+    const from=alertTime(r.message?.match(/Valid From:\s*(.+)/i)?.[1])??alertTime(r.message?.match(/Begin Time:\s*(.+)/i)?.[1])??ms(publishedAt);
+    const until=alertTime(r.message?.match(/(?:Now Valid Until|Valid To|End Time):\s*(.+)/i)?.[1]);
+    return record(snapshot,{...base,quantity:'sep_warning',start:from,end:until&&until>from?until:from+86400000,value:/^\w{3}PC/i.test(code)||/100\s*MeV/i.test(r.message??'')?100:10,unit:'MeV',payload:{...base.payload,summary:/^SUM/i.test(code)}});
   });
 }
 export function nmdbURL(start,end){const u=new URL(SOURCES.find(s=>s.id==='nmdb').url);for(const [k,v] of Object.entries({formchk:1,output:'ascii',dtype:'corr_for_efficiency',tabchoice:'revori',tresolution:60,yunits:0,date_choice:'bydate'}))u.searchParams.set(k,v);for(const station of ['OULU','ROME'])u.searchParams.append('stations[]',station);for(const [prefix,t] of [['start',start],['end',end]]){const d=new Date(t);for(const [k,v] of Object.entries({year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate(),hour:d.getUTCHours(),min:d.getUTCMinutes()}))u.searchParams.set(`${prefix}_${k}`,v);}return u.href;}

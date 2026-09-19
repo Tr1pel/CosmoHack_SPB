@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Cache} from '../pipeline/cache.mjs';
 import {normalizeSeries,selectVersions,valueAt,coverageOf} from '../pipeline/quality.mjs';
-import {goes,hp30,hp30Forecast,omm,nmdb,socrates,geoalert,parseCSV} from '../pipeline/adapters.mjs';
+import {goes,hp30,hp30Forecast,swpcProbabilities,swpcAlerts,omm,nmdb,socrates,geoalert,parseCSV} from '../pipeline/adapters.mjs';
 import {orbitProfile,accessibleFlux,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from '../pipeline/orbit.mjs';
 import {grun,earthFactor} from '../pipeline/meteor.mjs';
 import {buildDataset} from '../pipeline/build.mjs';
@@ -60,7 +60,7 @@ test('accessible spectrum never extrapolates beyond measured energy',()=>{
  const c=[{energy:10,value:100},{energy:100,value:1}];assert(Math.abs(accessibleFlux(c,Math.sqrt(1000))-10)<1e-10);assert.equal(accessibleFlux(c,500),null);assert.equal(accessibleFlux([{energy:10,value:null}],10),null);
 });
 test('empty live dataset validates and never recommends shifting into missing data',async()=>{
- const d=validateV2(await buildDataset(request,[]));assert.equal(d.sources.length,12);const plan=assessV2(request,d);assert.equal(plan.outcome,'insufficient');assert.equal(plan.improvement,false);assert.equal(plan.recommended.confidence.level,'low');assert.equal(plan.original.factors.sep.value,null);
+ const d=validateV2(await buildDataset(request,[]));assert.equal(d.sources.length,14);const plan=assessV2(request,d);assert.equal(plan.outcome,'insufficient');assert.equal(plan.improvement,false);assert.equal(plan.recommended.confidence.level,'low');assert.equal(plan.original.factors.sep.value,null);
  const bad=structuredClone(d);bad.profile.samples[0].sep=NaN;assert.throws(()=>validateV2(bad));
  assert.equal(compareVector([0,1,100000],[1,0,0]),-1);
 });
@@ -191,4 +191,57 @@ test('the persistence baseline never scores above 2, and without a SWPC issue it
  assert.equal(basis(),2);
  for(const p of d.profile.samples)p.sepEventProbability=40;assert.equal(basis(),1);
  for(const p of d.profile.samples)p.sepEventProbability=null;assert.equal(basis(),0);
+});
+test('SWPC probabilities map day 1-3 onto whole UTC days and stay undated',()=>{
+ const rows=swpcProbabilities(snap([{date:'2024-05-10T00:00:00','10mev_protons_1_day':1,'10mev_protons_2_day':15,'10mev_protons_3_day':null,polar_cap_absorption:'green'}],'noaa.swpc.probabilities'));
+ assert.equal(rows.length,2);
+ assert.equal(rows[0].start,Date.parse('2024-05-10T00:00:00Z'));assert.equal(rows[0].end,Date.parse('2024-05-11T00:00:00Z'));
+ assert.equal(rows[1].value,15);assert.equal(rows[1].start,Date.parse('2024-05-11T00:00:00Z'));
+ // The product states no issue time, so it must never become a replay source.
+ assert.equal(rows[0].publishedAt,null);assert.equal(rows[0].quantity,'sep_event_probability');
+ assert.throws(()=>swpcProbabilities(snap([{date:'2024-05-10T00:00:00'}],'noaa.swpc.probabilities')));
+});
+test('SWPC alerts keep issue time apart from validity and split protons from the rest',()=>{
+ const warning='Space Weather Message Code: WARPX1\r\nSerial Number: 631\r\nIssue Time: 2024 May 10 1620 UTC\r\n\r\nWARNING: Proton 10MeV Integral Flux above 10pfu expected\r\nValid From: 2024 May 10 1620 UTC\r\nValid To: 2024 May 11 0200 UTC';
+ const hundred='Space Weather Message Code: WARPC0\r\nSerial Number: 123\r\nIssue Time: 2024 May 10 1630 UTC\r\nValid From: 2024 May 10 1630 UTC\r\nNow Valid Until: 2024 May 11 0000 UTC';
+ const summary='Space Weather Message Code: SUMPX1\r\nSerial Number: 134\r\nSUMMARY: Proton Event 10MeV Integral Flux exceeded 10pfu\r\nBegin Time: 2024 May 10 1615 UTC\r\nEnd Time: 2024 May 10 2135 UTC';
+ const rows=swpcAlerts(snap([
+   {product_id:'P11W',issue_datetime:'2024-05-10 16:20:40.413',message:warning},
+   {product_id:'P20W',issue_datetime:'2024-05-10 16:30:00.000',message:hundred},
+   {product_id:'P11S',issue_datetime:'2024-05-11 11:55:17.633',message:summary},
+   {product_id:'K04W',issue_datetime:'2024-05-10 12:00:00.000',message:'Space Weather Message Code: WATA20\r\nGeomagnetic K-index of 4'}],'noaa.swpc.alerts'));
+ const warn=rows.filter(r=>r.quantity==='sep_warning');
+ assert.equal(warn.length,3);assert.equal(rows.filter(r=>r.quantity==='bulletin').length,1);
+ assert.equal(warn[0].publishedAt,'2024-05-10T16:20:40.413Z');
+ assert.equal(warn[0].start,Date.parse('2024-05-10T16:20:00Z'));assert.equal(warn[0].end,Date.parse('2024-05-11T02:00:00Z'));
+ assert.equal(warn[0].value,10);assert.equal(warn[1].value,100);
+ // A summary describes an event already over and must not suppress a later baseline.
+ assert.equal(warn[2].payload.summary,true);assert.equal(warn[0].payload.summary,false);
+});
+test('partial forecast coverage leaves the confirmed part; a live warning removes confirmation',async()=>{
+ const current={...request,mode:'current'};
+ const d=await buildDataset(current,[],{generatedAt:iso(t)});
+ const fill=extra=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'persistence',sepObservedAt:t,sepBound:false,sepEventProbability:1,sepWarning:false,...extra});};
+ const basis=()=>assessV2(current,d).original.confidence.criteria.find(c=>c.id==='forecast');
+ fill();assert.equal(basis().score,2);
+ // The horizon ends inside the window: the covered part still counts, so 1 rather than 0.
+ fill();for(const p of d.profile.samples)if(p.t>=t+1800000)p.sepEventProbability=null;
+ assert.equal(basis().score,1);assert.match(basis().detail,/хвост окна выходит за горизонт/);
+ fill({sepWarning:true});assert.equal(basis().score,1);assert.match(basis().detail,/предупреждение SWPC/);
+ fill({sepEventProbability:null});assert.equal(basis().score,0);
+});
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const swpcTime=x=>{const d=new Date(x),p2=n=>String(n).padStart(2,'0');return `${d.getUTCFullYear()} ${MON[d.getUTCMonth()]} ${p2(d.getUTCDate())} ${p2(d.getUTCHours())}${p2(d.getUTCMinutes())} UTC`;};
+test('a warning issued before the lookback still counts while its validity covers the window',async()=>{
+ const current={...request,mode:'current'},issued=t-6*86400000;
+ const alert=swpcAlerts({...snap([{product_id:'P11W',issue_datetime:iso(issued).replace('T',' ').replace('Z',''),
+   message:`Space Weather Message Code: WARPX1\r\nSerial Number: 900\r\nValid From: ${swpcTime(issued)}\r\nNow Valid Until: ${swpcTime(t+3600000)}`}],'noaa.swpc.alerts'),fetchedAt:iso(t)});
+ assert.equal(alert[0].quantity,'sep_warning');assert.equal(alert[0].end,t+3600000);
+ const outcomes=[{id:'noaa.swpc.alerts',ok:true,fetchedAt:iso(t),version:'v'}];
+ const d=await buildDataset(current,alert,{generatedAt:iso(t),outcomes});
+ const at=x=>d.profile.samples.find(p=>p.t===x);
+ assert.equal(at(t).sepWarning,true);assert.equal(at(t+5400000).sepWarning,false);
+ // Without the feed the answer is unknown, not "quiet".
+ const blind=await buildDataset(current,[],{generatedAt:iso(t)});
+ assert.equal(blind.profile.samples[0].sepWarning,null);
 });
