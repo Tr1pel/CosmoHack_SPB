@@ -19,6 +19,7 @@ lightConstraint. Некорректный запрос — HTTP 400; отказ 
 | sources[] | Любое число уникальных источников, связь factors[] многие-ко-многим |
 | series[] | Разделённые по инструменту измерения/ревизии |
 | profile | stepSeconds=30, propagator, objectId=25544, epoch, samples[] |
+| mapProfile | Необязательный орбитальный профиль карты с шагом 30 с до 24 часов после последнего кандидата |
 | factors[] | sep, trapped, gcr, meteor, ops |
 | events[] | Выводы/внешние предупреждения, источник не равен фактору |
 | coverage | validSamples, expectedSamples, fraction и gaps для каждого ряда |
@@ -52,6 +53,10 @@ hp30Forecast, neutronRates (counts/s), gcr (доля межпланетного 
 обрезания, 0…1), meteor (hits/s) и ops (число сближений TCA ± 30 мин в экране
 SOCRATES; null вне 7 суток от снимка или без SOCRATES). Неизвестное равно null.
 Отсутствие локальной модели ГКЛ не заменяется наземным счётом NMDB.
+`mapProfile.samples` содержит только орбитальные поля: t, lat, lon, alt, sunlit,
+orbitSourceId и epoch. Профиль карты соблюдает отсечение публикаций и предел
+возраста элементов 24 часа; за пределами их применимости координаты равны null.
+Он не расширяет горизонт оценки механизмов. Без mapProfile карта использует profile.
 У SEP есть происхождение значения: `sepBasis` (`observation|persistence`),
 `sepObservedAt` — время замера GOES, `sepBound: true` — оценка сверху (энергия
 выше последнего канала или неизвестный индекс). `ap8Floor: true` — AP-8 ниже

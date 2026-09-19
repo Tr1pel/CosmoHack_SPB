@@ -160,21 +160,11 @@
 .details-panel summary{cursor:pointer;font-size:12.5px;color:#5a6677}
 .details-panel details li{font-size:12px;line-height:1.6;color:#687486;margin:6px 0}
 .details-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;font-size:11px}
-.glossary-panel{padding:0 0 6px}
-.glossary{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px 28px;margin:0;padding:4px 20px 16px}
-.glossary>div{min-width:0}
-.glossary dt{font-weight:600;font-size:12.5px;color:#344053;margin-bottom:3px}
-.glossary dd{margin:0;font-size:12px;line-height:1.55;color:#6f7b8c}
 @media(max-width:1100px){.summary-panel{grid-template-columns:1fr;gap:16px}.summary-confidence{border-left:0;border-top:1px solid var(--line);padding:14px 0 0}.details-grid{grid-template-columns:1fr}.details-grid>div+div{border-left:0;border-top:1px solid var(--line)}}
 @media(max-width:760px){.request-panel.horizontal .field{flex-basis:140px}.summary-panel{padding:18px}.windows-intro{margin:0 14px 10px}.windows-panel .panel-heading{padding:16px 14px 8px}}
 .pane-switch button{padding:5px 12px;font-weight:600}
-.gantt.mode-timeline{grid-template-columns:286px minmax(380px,1fr);min-width:720px}
+.gantt.mode-timeline{grid-template-columns:240px minmax(460px,1fr);min-width:740px}
 .mode-timeline .g-label{grid-column:1/2}
-.env-row.lanes>.g-track,.env-row.lanes>.g-label{min-height:56px}
-.window-lane{height:12px;line-height:10px;font-size:9.5px;font-weight:700;text-align:center;padding:0 3px;background:#f0f2f5;border-color:#d9dee6;color:#5d6b7c}
-.window-lane.acceptable{background:#dff0e4;border-color:#abd3b8;color:#3f7351}
-.window-lane.review{background:#fbe8da;border-color:#efc4a2;color:#a8683a}
-.window-lane.selected{box-shadow:0 0 0 2px #5d8eca;z-index:2}
 .summary-confidence>strong{display:flex;align-items:baseline;gap:8px}
 .summary-confidence>strong em{font-style:normal;font-size:12px;font-weight:600;color:#8a95a4}
 .summary-confidence .conf-meaning{color:#7b8695}
@@ -183,10 +173,27 @@
 .conf-score{font-size:12px;font-weight:600;color:#8a95a4}
 .criteria strong{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .crit-score{font-size:11px;font-weight:600;color:#8a95a4;white-space:nowrap}
-.criteria small.crit-measures{color:#98a2b0;font-style:italic}
 .criteria li.limiting strong{color:#22303f}
 .criteria li.limiting{background:#fbfcfd;border-radius:7px;padding:7px 8px;margin:-7px -8px}
 .conf-raise{color:#4f74a8}
-.env-row.lanes-2>.g-track,.env-row.lanes-2>.g-label{min-height:42px}
-.env-row.lanes-3>.g-track,.env-row.lanes-3>.g-label{min-height:56px}
-.env-row.lanes-4>.g-track,.env-row.lanes-4>.g-label{min-height:70px}
+
+.mode-timeline .g-label{padding:12px 20px;background:#fcfcfd}
+.mode-timeline .env-row>.g-track,.mode-timeline .env-row>.g-label{min-height:48px}
+.mode-timeline .lanes>.g-track,.mode-timeline .lanes>.g-label{min-height:var(--lane-height,56px);background:#f7fbf8}
+.mode-timeline .lane-count{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:10px;background:#e1efe5;color:#3f7351;font-size:11px}
+.mode-timeline .window-lane{display:flex;align-items:center;justify-content:center;gap:7px;height:24px;line-height:20px;padding:1px 6px;background:#dff0e4;border-color:#abd3b8;color:#3f7351;border-radius:5px;overflow:hidden;white-space:nowrap}
+.mode-timeline .window-lane span{overflow:hidden;text-overflow:ellipsis;font-size:10px}
+.mode-timeline .window-lane b{flex-shrink:0;font-size:11px}
+.mode-timeline .window-lane:hover{background:#cce6d4;border-color:#6ca57c}
+.mode-timeline .window-lane.selected{box-shadow:inset 0 0 0 1px #427cb9;border-color:#427cb9;z-index:2}
+.mode-timeline .window-lane:focus-visible{outline:2px solid #427cb9;outline-offset:2px;z-index:3}
+
+.details-panel details.criterion{padding:0;border:0;min-width:0}
+.criterion summary strong{display:inline;font-size:12px}
+.criterion .crit-score{margin-left:8px}
+.criterion[open] summary{margin-bottom:6px}
+
+.mode-timeline .g-axis .axis-start{transform:none;margin-left:6px}
+.mode-timeline .g-axis .axis-end{transform:translateX(-100%);margin-left:-6px}
+
+.map-coverage{display:block;margin-top:9px;font-size:12px;color:#8c98a7}

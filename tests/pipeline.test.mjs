@@ -50,6 +50,22 @@ test('real source shapes preserve instrument, completed intervals and publicatio
  const rows=socrates(snap('NORAD_CAT_ID_1,NORAD_CAT_ID_2,TCA,TCA_RANGE\n25544,123,2024-05-10 12:00:00,0.8\n99,22,2024-05-10 13:00:00,0.1','celestrak.socrates'));assert.equal(rows.length,1);assert.equal(rows[0].objectId,25544);
 });
 const elements={NORAD_CAT_ID:25544,EPOCH:'2024-05-10T09:00:00',MEAN_MOTION:15.5,ECCENTRICITY:0.0005,INCLINATION:51.64,RA_OF_ASC_NODE:100,ARG_OF_PERICENTER:50,MEAN_ANOMALY:10,BSTAR:0.0001,MEAN_MOTION_DOT:0.0001,MEAN_MOTION_DDOT:0};
+test('map orbit covers 24 hours after the last candidate without extending mechanism calculations',async()=>{
+ const records=omm(snap([elements,{...elements,EPOCH:'2024-05-11T08:00:00'}],'spacetrack.history'));
+ let modelSamples=0;
+ const d=await buildDataset(request,records,{modelRunner:async profile=>{modelSamples=profile.samples.length;return {samples:[],error:'Test fixture'};}});
+ assert.equal(d.profile.samples.at(-1).t,t+2*3600000);
+ assert.equal(modelSamples,d.profile.samples.length);
+ assert.equal(d.mapProfile.samples.at(-1).t,t+25*3600000);
+ assert.notEqual(d.mapProfile.samples.at(-1).lat,null);
+ assert.deepEqual(d.profile.samples.map(p=>[p.t,p.lat,p.lon,p.sunlit]),d.mapProfile.samples.slice(0,d.profile.samples.length).map(p=>[p.t,p.lat,p.lon,p.sunlit]));
+ assert.equal(assessV2(request,validateV2(d)).mapProfile,d.mapProfile);
+ const bad=structuredClone(d);bad.mapProfile.samples[0].lon=NaN;assert.throws(()=>validateV2(bad));
+ const replay=await buildDataset({...request,historyMode:'replay'},records);
+ assert(replay.mapProfile.samples.every(p=>p.lat===null));
+ const disabled=await buildDataset(request,records,{disabled:['spacetrack.history']});
+ assert(disabled.mapProfile.samples.every(p=>p.lat===null));
+});
 test('SGP4 propagates OMM; expired and future epochs never become synthetic orbits',()=>{
  const records=omm(snap([elements],'celestrak.gp')),profile=orbitProfile(records,t,t+3600000);
  assert.equal(profile.samples.length,121);assert(profile.samples.every(p=>p.alt>350&&p.alt<500&&Math.abs(p.lat)<52));assert(profile.samples.some(p=>p.sunlit));assert(profile.samples.some(p=>!p.sunlit));

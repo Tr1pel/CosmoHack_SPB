@@ -16,6 +16,16 @@ export function validateV2(data,disabled=[]) {
   if(new Set(data.events.map(e=>e.id)).size!==data.events.length)fail();
   for(const e of data.events){if(!/^[\w-]+$/.test(e.id)||!ids.includes(e.sourceId)||!mechanisms.includes(e.factor)||!provenance.includes(e.provenance)||!finite(e.start)||!finite(e.end)||e.end<=e.start||!finite(e.value)||!timestamp(e.measuredAt)||(e.publishedAt!==null&&(!timestamp(e.publishedAt)||Date.parse(e.measuredAt)>Date.parse(e.publishedAt))))fail();}
   let prev=-Infinity;for(const p of data.profile.samples){if(!finite(p.t)||p.t<=prev||(prev!==-Infinity&&p.t-prev!==30000))fail();prev=p.t;for(const key of ['lat','lon','alt','sep','trapped','gcr','meteor'])if(p[key]!==null&&!finite(p[key]))fail();if(p.lat!==null&&Math.abs(p.lat)>90||p.lon!==null&&Math.abs(p.lon)>180||p.sunlit!==null&&typeof p.sunlit!=='boolean')fail();}
+  if(data.mapProfile!==undefined){
+    if(!Array.isArray(data.mapProfile?.samples)||data.mapProfile.stepSeconds!==30)fail();
+    let previous=-Infinity;
+    for(const p of data.mapProfile.samples){
+      if(!finite(p.t)||p.t<=previous||(previous!==-Infinity&&p.t-previous!==30000))fail();
+      previous=p.t;
+      for(const key of ['lat','lon','alt'])if(p[key]!==null&&!finite(p[key]))fail();
+      if(p.lat!==null&&Math.abs(p.lat)>90||p.lon!==null&&Math.abs(p.lon)>180||p.sunlit!==null&&typeof p.sunlit!=='boolean')fail();
+    }
+  }
   for(const g of data.gaps)if(!ids.includes(g.sourceId)||!finite(g.start)||!finite(g.end)||g.end<=g.start)fail();
   return {...data,sources:data.sources.map(s=>({...s,enabled:s.enabled&&!disabled.includes(s.id)}))};
 }
@@ -32,7 +42,7 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
   const criteria=[],add=(id,label,measures,score,detail,hint)=>criteria.push({id,label,measures,score,level:scoreLevel(score),detail,hint:score>=SCORE_MAX?null:hint});
   add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',missing.length?0:4,
     missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(factors[id]?.coverage??orbitCoverage)}`).join('; ')}. Окно не оценивается: отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
-    'Включите отключённые источники или дождитесь загрузки («Источники и происхождение»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
+    'Включите отключённые источники или дождитесь загрузки («Состояние данных»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
   const goes=sources.find(s=>s.id==='noaa.swpc');
   if(request.mode!=='current')add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',4,
     request.historyMode==='replay'?'Replay: взяты только выпуски, опубликованные до момента отсечения, — ровно то, что было известно тогда':'Архивный разбор: наблюдения относятся к самому периоду окна');
@@ -76,7 +86,7 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
   const broken=sources.filter(s=>s.applicable!==false&&(!s.enabled||s.status!=='fresh')&&s.factors?.some(f=>gaps.includes(f)));
   add('context','Контекст: ГКЛ и сближения','Посчитаны ли механизмы, которые показываются, но выбор окна не блокируют',!gaps.length?4:broken.length?2:3,
     !gaps.length?'Сближения проверены по экрану SOCRATES, фон ГКЛ рассчитан на всё окно':`${gaps.map(id=>`${name(id)} — ${percent(factors[id].coverage)} покрытия`).join('; ')}. ${broken.length?`Источник не отвечает или отключён: ${broken.map(s=>s.name).join(', ')}`:'Это заявленная граница охвата, а не отказ источника: экран SOCRATES существует только в текущем режиме и на 7 суток от своего выпуска'}`,
-    broken.length?'Включите источник в разделе «Источники и происхождение» и обновите данные':'Полное покрытие контекста возможно только в текущем режиме внутри 7 суток от выпуска SOCRATES; на выбор окна это не влияет');
+    broken.length?'Включите источник в разделе «Состояние данных» и обновите данные':'Полное покрытие контекста возможно только в текущем режиме внутри 7 суток от выпуска SOCRATES; на выбор окна это не влияет');
   const score=Math.min(...criteria.map(c=>c.score));
   return {score,level:scoreLevel(score),limiting:criteria.filter(c=>c.score===score).map(c=>c.id),criteria};
 }
@@ -132,5 +142,9 @@ export function assessV2(request,data){
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
+<<<<<<< Updated upstream
   return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.4.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+=======
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.3.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+>>>>>>> Stashed changes
 }
