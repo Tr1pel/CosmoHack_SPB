@@ -133,13 +133,15 @@ IGRF-14 до 2030.0 — нужна для текущих дат, требует 
 
 ## Источники
 
-11 источников в `SOURCES` (`pipeline/adapters.mjs`), у каждого — `modes`
+14 источников в `SOURCES` (`pipeline/adapters.mjs`), у каждого — `modes`
 (в каких режимах он вообще даёт данные), `factors`, `cadenceMinutes`. Источник
 вне своих режимов помечается `applicable: false` — это не сбой и не входит в
 «N из M доступных».
 
 GOES SGPS (SEP) · GFZ Hp30 и его ансамблевый прогноз (экран) · NOAA SWPC
-3-day forecast (вероятность S1+) · CelesTrak GP и Space-Track GP history
+3-day forecast и JSON `solar_probabilities` (вероятность S1+, второй — резерв без
+времени выпуска) · NOAA SWPC alerts (датированные WARPX/ALTPX/SUMPX со сроком
+действия) · CelesTrak GP и Space-Track GP history
 (орбита) · NMDB OULU/ROME (ГКЛ, независимое подтверждение) · SOCRATES
 (сближения) · DONKI и NCEI GEOALERT (датированный контекст) · IGRF/IRBEM/AP-8
 (локальная модель) · NASA MEO + Грюн (метеоры).
