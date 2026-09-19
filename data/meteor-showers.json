@@ -1,5 +1,54 @@
 {
   "schemaVersion": 1,
-  "description": "Проверенных абсолютных потоков пока нет. Не заполнять числами из примера документа. Импортировать выпуск NASA MEO с датой публикации, площадью и порогом массы.",
-  "records": []
+  "description": "Верхняя оценка полного метеороидного потока: спорадический фон Грюна (1985, формула и поправки на Землю SPENVIS) для 420 км и массы ≥ 3,35·10⁻⁵ г (6,7 Дж, NASA MEO), умноженный на 2 — по выпускам NASA MEO при этой энергии фон превышают только Геминиды. Окна Геминид (пик ± 7 сут) и годы без выпуска MEO не оцениваются. Генерируется scripts/meteor-table.mjs.",
+  "records": [
+    {
+      "start": "2024-01-01T00:00:00.000Z",
+      "end": "2024-12-07T02:10:00.000Z",
+      "publishedAt": "2023-11-02T00:00:00Z",
+      "sourceVersion": "NASA MEO LEO forecast 2024 (issued 2023-11-02) + Grün 1985",
+      "sourceUrl": "https://ntrs.nasa.gov/api/citations/20230015158/downloads/LEO_Forecast_2024.pdf",
+      "massThresholdG": 0.0000335,
+      "altitudeKm": 420,
+      "sporadicFluxM2Second": 1.517612673189671e-9,
+      "showerBoundFactor": 2,
+      "fluxM2Second": 3.035225346379342e-9
+    },
+    {
+      "start": "2024-12-21T02:10:00.000Z",
+      "end": "2025-01-01T00:00:00.000Z",
+      "publishedAt": "2023-11-02T00:00:00Z",
+      "sourceVersion": "NASA MEO LEO forecast 2024 (issued 2023-11-02) + Grün 1985",
+      "sourceUrl": "https://ntrs.nasa.gov/api/citations/20230015158/downloads/LEO_Forecast_2024.pdf",
+      "massThresholdG": 0.0000335,
+      "altitudeKm": 420,
+      "sporadicFluxM2Second": 1.517612673189671e-9,
+      "showerBoundFactor": 2,
+      "fluxM2Second": 3.035225346379342e-9
+    },
+    {
+      "start": "2026-01-01T00:00:00.000Z",
+      "end": "2026-12-07T13:00:00.000Z",
+      "publishedAt": "2025-10-17T00:00:00Z",
+      "sourceVersion": "NASA MEO LEO forecast 2026 (issued 2025-10-17) + Grün 1985",
+      "sourceUrl": "https://ntrs.nasa.gov/api/citations/20250009524/downloads/LEO_Forecast_2026.pdf",
+      "massThresholdG": 0.0000335,
+      "altitudeKm": 420,
+      "sporadicFluxM2Second": 1.517612673189671e-9,
+      "showerBoundFactor": 2,
+      "fluxM2Second": 3.035225346379342e-9
+    },
+    {
+      "start": "2026-12-21T13:00:00.000Z",
+      "end": "2027-01-01T00:00:00.000Z",
+      "publishedAt": "2025-10-17T00:00:00Z",
+      "sourceVersion": "NASA MEO LEO forecast 2026 (issued 2025-10-17) + Grün 1985",
+      "sourceUrl": "https://ntrs.nasa.gov/api/citations/20250009524/downloads/LEO_Forecast_2026.pdf",
+      "massThresholdG": 0.0000335,
+      "altitudeKm": 420,
+      "sporadicFluxM2Second": 1.517612673189671e-9,
+      "showerBoundFactor": 2,
+      "fluxM2Second": 3.035225346379342e-9
+    }
+  ]
 }

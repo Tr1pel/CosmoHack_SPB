@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
-import {SOURCES,goes,hp30,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
+import {SOURCES,goes,hp30,hp30Forecast,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
 import {normalizeSeries,selectVersions,valueAt,coverageOf,validateMeteorTable,ms,iso} from './quality.mjs';
-import {orbitProfile,magneticProfile,accessibleFlux} from './orbit.mjs';
+import {orbitProfile,magneticProfile,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from './orbit.mjs';
 import {validateRequest,HOUR} from '../dist/domain.js';
 export const FACTORS=[{id:'sep',name:'Солнечные протоны'},{id:'trapped',name:'Захваченные частицы'},{id:'gcr',name:'Галактический фон'},{id:'meteor',name:'Метеорная обстановка'},{id:'ops',name:'Эксплуатационный контекст'}];
 const rules=JSON.parse(await readFile(new URL('../data/rules.json',import.meta.url),'utf8'));
@@ -10,7 +10,7 @@ export async function collect(cache,request,disabled=[]){
   const start=ms(request.start),end=start+(request.duration+request.shift)*HOUR;
   const jobs=[];const add=(id,url,adapter,ttl)=>{if(!disabled.includes(id))jobs.push({id,url,adapter,ttl});};
   if(request.mode==='current'){
-    for(const [id,adapter,ttl] of [['noaa.swpc',goes,5],['celestrak.gp',omm,120],['celestrak.socrates',socrates,480]])add(id,SOURCES.find(s=>s.id===id).url,adapter,ttl);
+    for(const [id,adapter,ttl] of [['noaa.swpc',goes,5],['celestrak.gp',omm,120],['celestrak.socrates',socrates,480],['gfz.hp30.forecast',hp30Forecast,60]])add(id,SOURCES.find(s=>s.id===id).url,adapter,ttl);
   }
   add('gfz.hp30',`https://kp.gfz.de/app/json/?start=${iso(start-2*HOUR).slice(0,19)}Z&end=${iso(end).slice(0,19)}Z&index=Hp30`,hp30,30);
   add('nmdb',nmdbURL(start-2*HOUR,end),nmdb,60);
@@ -34,52 +34,73 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
   const magnetic=disabled.includes('model.irbem')?{samples:[],error:'Модель отключена'}:await modelRunner(profile,python);
   const magneticByTime=new Map(magnetic.samples.map(p=>[p.t,p]));
   const hp=series.find(s=>s.quantity==='hp30'),protons=series.filter(s=>s.quantity==='proton_integral_flux');
+  const instruments=[...new Set(protons.map(s=>s.instrument))];
+  const spectrumAt=(instrument,t)=>protons.filter(s=>s.instrument===instrument).map(s=>({energy:s.energy,value:valueAt(s,t)}));
+  // Current mode only: after an instrument's last valid sample its spectrum is carried forward,
+  // the reference baseline «последнее наблюдение сохраняется», for at most persistence.maxHours.
+  const lastSample=Object.fromEntries(instruments.map(i=>[i,Math.max(...protons.filter(s=>s.instrument===i).flatMap(s=>s.samples.filter(x=>x.q==='ok').map(x=>x.t)))]));
+  const persistence=request.mode==='current'?rules.sep.persistence.maxHours*HOUR:0;
+  const forecasts=request.mode==='current'?visible.filter(r=>r.quantity==='hp30_forecast'&&Number.isFinite(r.value)).sort((a,b)=>ms(b.measuredAt)-ms(a.measuredAt)):[];
   for(const p of profile.samples){
-    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,L:null,B:null,magLat:null,rc:null,ec:null,saa:null,sep:null,trapped:null,gcr:null,meteor:null});
-    if(m&&p.lat!==null){p.L=m.L;p.B=m.B;p.magLat=m.magLat??null;p.ap8Min=m.ap8Min;p.ap8Max=m.ap8Max;p.saa=Number.isFinite(m.B)&&Number.isFinite(m.L)?m.B<rules.saa.maxBNt&&m.L<rules.saa.maxL:null;
+    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,hp30Forecast:null,L:null,B:null,magLat:null,rc:null,ec:null,cutoff:null,saa:null,sep:null,sepBasis:null,sepBound:null,sepObservedAt:null,trapped:null,gcr:null,meteor:null});
+    if(p.hp30===null)p.hp30Forecast=forecasts.find(r=>r.start<=p.t&&p.t<r.end)?.value??null;
+    if(m&&p.lat!==null){p.L=m.L;p.B=m.B;p.magLat=m.magLat??null;p.ap8Min=m.ap8Min;p.ap8Max=m.ap8Max;p.ap8Floor=m.ap8Floor??null;p.saa=Number.isFinite(m.B)&&Number.isFinite(m.L)?m.B<rules.saa.maxBNt&&m.L<rules.saa.maxL:null;
       if(Number.isFinite(m.ap8Max)&&Number.isFinite(m.ap8Min)&&m.ap8Max>=0&&m.ap8Min>=0)p.trapped=Math.max(m.ap8Min,m.ap8Max);
-      if(Number.isFinite(m.L)&&m.L>0&&p.hp30!==null&&p.hp30<5){p.rc=Math.min(20,rules.cutoff.coefficientGV/(m.L*m.L));p.ec=Math.hypot(1000*p.rc,938.272)-938.272;
-        const instruments=[...new Set(protons.map(s=>s.instrument))];const values=instruments.map(instrument=>accessibleFlux(protons.filter(s=>s.instrument===instrument).map(s=>({energy:s.energy,value:valueAt(s,p.t)})),Math.max(p.ec,rules.suitEnergyMeV))).filter(v=>v!==null);
-        // Conflicting simultaneous instruments do not become an averaged measurement.
-        if(values.length===1)p.sep=values[0];
-      }
+      const shield=cutoffRigidity(p.magLat,p.alt,p.hp30??p.hp30Forecast,rules.cutoff);
+      if(shield){p.rc=shield.rc;p.ec=cutoffEnergy(shield.rc);p.cutoff=shield.storm?'storm':'quiet';}
     }
+    let basis='observation',observedAt=p.t,spectra=instruments.map(i=>spectrumAt(i,p.t)).filter(c=>c.some(x=>x.value!==null));
+    if(!spectra.length&&persistence){
+      const recent=instruments.filter(i=>p.t>lastSample[i]&&p.t-lastSample[i]<=persistence);
+      spectra=recent.map(i=>spectrumAt(i,lastSample[i]));observedAt=Math.max(...recent.map(i=>lastSample[i]));basis='persistence';
+    }
+    // Conflicting simultaneous instruments do not become an averaged measurement. Without a
+    // cutoff (no index or no magnetic model) only the unshielded bound J(>= suit energy) is left.
+    const flux=spectra.length===1?accessibleFluxBound(spectra[0],Math.max(p.ec??0,rules.suitEnergyMeV)):null;
+    if(flux&&p.lat!==null)Object.assign(p,{sep:flux.value,sepBound:flux.bound||p.ec===null,sepBasis:basis,sepObservedAt:observedAt});
     // NMDB is exposed as independent ground context, not mislabeled as local GCR flux.
     p.neutronRates=Object.fromEntries(series.filter(s=>s.quantity==='neutron_rate').map(s=>[s.instrument,valueAt(s,p.t)]));
     const meteor=meteorTable.records.filter(r=>!disabled.includes('nasa.meo')&&ms(r.start)<=p.t&&p.t<ms(r.end)&&(!replay||(r.publishedAt&&ms(r.publishedAt)<=cutoff)));
     if(meteor.length===1&&Number.isFinite(meteor[0].fluxM2Second)&&meteor[0].fluxM2Second>=0)p.meteor=meteor[0].fluxM2Second*rules.suitAreaM2;
   }
-  const sources=SOURCES.map(s=>{
-    const rows=visible.filter(r=>r.sourceId===s.id),result=outcomes.filter(o=>o.id===s.id),last=rows.reduce((a,r)=>!a||ms(r.fetchedAt)>ms(a)?r.fetchedAt:a,null);
+  // The meteor table is a dated local release, not a fetched record stream.
+  const meteorRows=meteorTable.records.filter(r=>ms(r.start)<end&&ms(r.end)>start&&(!replay||ms(r.publishedAt)<=cutoff));
+  const sources=SOURCES.map(({modes,...s})=>{
+    const rows=s.id==='nasa.meo'?meteorRows:visible.filter(r=>r.sourceId===s.id),result=outcomes.filter(o=>o.id===s.id),last=rows.reduce((a,r)=>!r.fetchedAt?a:!a||ms(r.fetchedAt)>ms(a)?r.fetchedAt:a,null);
     const publication=rows.map(r=>r.publishedAt).filter(Boolean).sort().at(-1)??null;
-    let status=rows.length?'fresh':'unavailable',detail=s.detail;
-    const ageLimit={'noaa.swpc':15,'gfz.hp30':60,'nmdb':120,'celestrak.gp':1440,'celestrak.socrates':480}[s.id];
+    // A successful response without records (quiet DONKI days) is fresh data, not a failure.
+    let status=rows.length||result.some(o=>o.ok)?'fresh':'unavailable',detail=s.detail;
+    // GOES 5-minute averages appear ~10-15 minutes late and are cached for 5 minutes.
+    const ageLimit={'noaa.swpc':30,'gfz.hp30':60,'gfz.hp30.forecast':360,'nmdb':120,'celestrak.gp':1440,'celestrak.socrates':480}[s.id];
     const latestMeasured=rows.reduce((n,r)=>Math.max(n,ms(r.measuredAt)),-Infinity);
     const ageMinutes=Number.isFinite(latestMeasured)?Math.max(0,(ms(generatedAt)-latestMeasured)/60000):null;
     if(request.mode==='current'&&ageLimit&&ageMinutes!==null&&ageMinutes>ageLimit)status='stale';
     if(result.some(o=>!o.ok)){status=rows.length?'stale':'unavailable';detail+='; '+result.filter(o=>!o.ok).map(o=>o.error).join('; ');}
     if(s.id==='model.irbem'){status=magnetic.samples.length?'fresh':'unavailable';detail=magnetic.error??magnetic.model;}
     if(s.id==='nasa.meo')status=profile.samples.some(p=>p.meteor!==null)?'fresh':'unavailable';
-    return {...s,status,ageMinutes,enabled:!disabled.includes(s.id),publishedAt:publication,lastSuccess:last??result.find(o=>o.ok)?.fetchedAt??null,version:rows.at(-1)?.sourceVersion??(s.id==='model.irbem'?magnetic.version:null)??'unavailable',provenance:s.id.startsWith('model.')||s.factors.includes('orbit')?'model':s.id==='celestrak.socrates'||s.id==='nasa.meo'?'external_forecast':'observation',replayEligible:rows.some(r=>r.publishedAt!==null),detail};
+    return {...s,status,applicable:modes.includes(request.mode),ageMinutes,enabled:!disabled.includes(s.id),publishedAt:publication,lastSuccess:last??result.find(o=>o.ok)?.fetchedAt??null,version:rows.at(-1)?.sourceVersion??result.find(o=>o.ok)?.version??(s.id==='model.irbem'?magnetic.version:null)??'unavailable',provenance:s.id.startsWith('model.')||s.id==='nasa.meo'||s.factors.includes('orbit')?'model':['celestrak.socrates','gfz.hp30.forecast'].includes(s.id)?'external_forecast':'observation',replayEligible:rows.some(r=>r.publishedAt!==null),detail};
   });
   const coverage=Object.fromEntries(series.map(s=>[s.id,coverageOf(s,start,end)]));
   const gaps=Object.entries(coverage).flatMap(([id,c])=>c.gaps.map(g=>({...g,seriesId:id,sourceId:series.find(s=>s.id===id).sourceId,publishedAt:null,reason:'Нет валидного отсчёта в пределах допустимого возраста'})));
-  for(const [factor,sourceId,key] of [['sep','noaa.swpc','sep'],['trapped','model.irbem','trapped'],['gcr','nmdb','gcr'],['meteor','nasa.meo','meteor'],['ops','celestrak.socrates','ops'],['orbit','celestrak.gp','lat']]){
+  const orbitSource=request.mode==='history'?'spacetrack.history':'celestrak.gp';
+  for(const [factor,sourceId,key] of [['sep','noaa.swpc','sep'],['trapped','model.irbem','trapped'],['gcr','nmdb','gcr'],['meteor','nasa.meo','meteor'],['ops','celestrak.socrates','ops'],['orbit',orbitSource,'lat']]){
+    const reason=rules.contextMechanisms.includes(factor)?'Контекстный механизм: полной оценки нет, выбор окна не блокирует':'Нет полной оценки механизма / траектории';
     let open=null;
     for(const point of profile.samples.filter(p=>p.t<end)){
       if(!Number.isFinite(point[key])){if(open===null)open=point.t;}
-      else if(open!==null){gaps.push({factor,sourceId,start:open,end:point.t,publishedAt:null,reason:'Нет полной оценки механизма / траектории'});open=null;}
+      else if(open!==null){gaps.push({factor,sourceId,start:open,end:point.t,publishedAt:null,reason});open=null;}
     }
-    if(open!==null)gaps.push({factor,sourceId,start:open,end,publishedAt:null,reason:'Нет полной оценки механизма / траектории'});
+    if(open!==null)gaps.push({factor,sourceId,start:open,end,publishedAt:null,reason});
   }
   // SOCRATES is a top-N sample: even a successful empty response cannot prove full coverage.
   const events=visible.filter(r=>r.quantity==='conjunction'&&r.objectId===25544&&Number.isFinite(r.start)&&Number.isFinite(r.end)&&Number.isFinite(r.value)&&r.start<end&&r.end>start).map((r,i)=>({id:`ops-${i}`,title:'Сближение со станцией',type:'TCA',factor:'ops',sourceId:r.sourceId,objectId:25544,start:r.start,end:r.end,tca:r.tca,measuredAt:r.measuredAt,publishedAt:r.publishedAt,value:r.value,unit:r.unit,provenance:r.provenance,origin:'Внешний прогноз',version:r.sourceVersion,rule:'OPS-01: TCA ± 30 минут; возможен манёвр станции',limitation:'SOCRATES top-N не является полным экраном сближений'}));
   return {schemaVersion:2,demo:false,generatedAt,sources,series,profile,factors:FACTORS,events,gaps,coverage,rules,orbit:{epoch:profile.epoch,model:profile.propagator,format:'OMM',objectId:25544},context:visible.filter(r=>['notification','bulletin'].includes(r.quantity)),limitations:[
     'Исследовательские прокси, не расчёт дозы и не допуск к ВКД.',rules.cutoff.limitation,
-    'GOES не экстраполируется за последний измеренный энергетический канал. Наблюдения не являются прогнозом будущего окна.',
-    'AP-8 — климатологическая модель; граница ЮАА исследовательская.',
-    'NMDB показан как наземный контекст; модель ГКЛ вдоль орбиты не калибрована.',
-    'SOCRATES top-N не доказывает отсутствие сближений. Метеорные потоки требуют проверенной таблицы NASA MEO.',
+    `SEP: интегральный поток GOES выше max(Ec, ${rules.suitEnergyMeV} МэВ). Спектр не экстраполируется: выше последнего канала и без геомагнитного индекса берётся верхняя оценка.`,
+    ...(persistence?[`После последнего замера GOES — базовый прогноз «последнее наблюдение сохраняется» (до ${rules.sep.persistence.maxHours} ч): начало события он не предсказывает; для будущих часов обрезание по прогнозу Hp30 GFZ.`]:[]),
+    'AP-8 — климатологическая модель; ниже нижнего уровня карты (1 см⁻²с⁻¹) поток равен 0; граница ЮАА исследовательская.',
+    'ГКЛ и сближения — контекст: не блокируют выбор окна. NMDB — наземный контекст, модели ГКЛ вдоль орбиты нет; SOCRATES top-N не доказывает отсутствие сближений.',
+    'Метеороиды: фон по модели Грюна с поправками на Землю × граница усиления потоков NASA MEO; окна Геминид не оцениваются.',
     ...(magnetic.error?[magnetic.error]:[])
   ]};
 }
