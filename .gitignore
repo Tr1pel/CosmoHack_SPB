@@ -4,3 +4,6 @@ artifacts/
 *.zip
 *.tar.gz
 local/
+.npm-cache/
+__pycache__/
+.venv/

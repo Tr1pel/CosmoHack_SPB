@@ -1,3 +1,8 @@
+# Примечание к версии
+
+Этот файл описывает прежнюю демонстрационную схему v1. Реальный локальный API
+использует [контракт v2](api-contract-v2.md) и [data-pipeline](data-pipeline.md).
+
 # Контракт входных данных v1
 
 Настройка: `dist/config.js`, `apiBaseUrl: 'https://your-backend.example'`. Endpoint: `POST /v1/eva/dataset`, JSON, тайм-аут 15 с. API не должен доверять ограничениям формы: валидируйте параметры на сервере.

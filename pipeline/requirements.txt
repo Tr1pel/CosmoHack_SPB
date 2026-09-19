@@ -1,0 +1,2 @@
+spacepy==0.7.0
+netCDF4==1.7.2

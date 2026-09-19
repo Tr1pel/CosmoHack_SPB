@@ -1,5 +1,7 @@
 import { HOUR, computePlan } from './domain.js';
+import {validateV2} from './pipeline.js';
 export function validateDataset(data,disabled=[]) {
+  if(data?.schemaVersion===2)return validateV2(data,disabled);
   const fail=()=>{throw new Error('Ответ сервера не соответствует контракту данных.');};
   const timestamp=x=>typeof x==='string'&&x.endsWith('Z')&&Number.isFinite(Date.parse(x));
   const interval=x=>Number.isFinite(x.start)&&Number.isFinite(x.end)&&x.end>x.start&&timestamp(x.publishedAt);
@@ -37,7 +39,7 @@ export class MockDataProvider {
 export class ApiDataProvider {
   constructor(baseUrl) {this.baseUrl=baseUrl.replace(/\/$/,'');}
   async load(request,disabled=[]) {
-    const response=await fetch(`${this.baseUrl}/v1/eva/dataset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request,disabledSources:disabled}),signal:AbortSignal.timeout(15000)});
+    const response=await fetch(`${this.baseUrl}/v2/eva/dataset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request,disabledSources:disabled}),signal:AbortSignal.timeout(120000)});
     if(!response.ok) throw new Error(`Источник данных вернул ошибку ${response.status}. Повторите загрузку.`);
     const data=await response.json();
     return validateDataset(data,disabled);

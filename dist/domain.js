@@ -1,3 +1,4 @@
+import {assessV2} from './pipeline.js';
 export const ALGORITHM_VERSION = 'eva-demo/1.0.0';
 export const HOUR = 3600000;
 export const time = ms => new Date(ms).toISOString().slice(11,16);
@@ -18,6 +19,7 @@ export function orbitPoint(ms, epoch) {
 }
 export function computePlan(request, dataset) {
   validateRequest(request);
+  if(dataset.schemaVersion===2)return assessV2(request,dataset);
   const start=Date.parse(request.start), replay=request.mode==='history' && request.historyMode==='replay';
   const cutoff=replay?Date.parse(request.cutoff):Infinity;
   const sources=dataset.sources.map(s=>({...s,eligible:s.enabled && s.status==='fresh' && Date.parse(s.publishedAt)<=cutoff}));

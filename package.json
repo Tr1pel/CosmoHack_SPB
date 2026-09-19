@@ -3,5 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "node scripts/serve.mjs", "start": "node scripts/serve.mjs", "test": "node --test tests/*.test.mjs", "check": "node --check dist/app.js && node --check dist/domain.js && node --check dist/providers.js && node --check dist/export.js" }
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "pipeline:fetch": "node scripts/pipeline.mjs fetch",
+    "pipeline:build": "node scripts/pipeline.mjs build",
+    "pipeline:import": "node scripts/pipeline.mjs import"
+  },
+  "dependencies": {
+    "satellite.js": "^7.1.0"
+  }
 }
