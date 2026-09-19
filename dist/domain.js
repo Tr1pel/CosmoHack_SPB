@@ -5,6 +5,15 @@ export const time = ms => new Date(ms).toISOString().slice(11,16);
 export const date = ms => new Date(ms).toLocaleDateString('ru-RU',{timeZone:'UTC',day:'2-digit',month:'short',year:'numeric'});
 export const range = w => `${time(w.start)}–${time(w.end)}`;
 export const overlap = (a,b,c,d) => Math.max(0, Math.min(b,d)-Math.max(a,c));
+// Current mode plans forward, and its form offers only a time of day: the date is derived.
+// A time that has already gone by today therefore means tomorrow, not a window in the past.
+// Compared against the start of the current hour, so picking the hour already running keeps today.
+export function nextStartUTC(hhmm,now=Date.now()){
+  if(!/^\d\d:\d\d$/.test(hhmm??''))return '';
+  const at=Date.parse(`${new Date(now).toISOString().slice(0,10)}T${hhmm}:00Z`);
+  if(!Number.isFinite(at))return '';
+  return new Date(at<Math.floor(now/HOUR)*HOUR?at+86400000:at).toISOString().slice(0,19)+'Z';
+}
 export function validateRequest(r) {
   if(!['current','history'].includes(r.mode)||!['archive','replay'].includes(r.historyMode)) throw new Error('Некорректный режим анализа.');
   if (!Number.isFinite(Date.parse(r.start))) throw new Error('Укажите корректные дату и время начала.');

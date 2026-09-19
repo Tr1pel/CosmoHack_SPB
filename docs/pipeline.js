@@ -40,9 +40,17 @@ export const scoreLevel=score=>score>=3?'high':score===2?'medium':'low';
 function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage,decision,step}){
   const name=id=>data.factors.find(f=>f.id===id)?.name??'Орбита',percent=x=>`${Math.round(x*100)} %`,minutes=n=>Math.round(n*step/60),hhmm=t=>new Date(t).toISOString().slice(11,16);
   const criteria=[],add=(id,label,measures,score,detail,hint)=>criteria.push({id,label,measures,score,level:scoreLevel(score),detail,hint:score>=SCORE_MAX?null:hint});
-  add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',missing.length?0:4,
-    missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(factors[id]?.coverage??orbitCoverage)}`).join('; ')}. Окно не оценивается: отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
-    'Включите отключённые источники или дождитесь загрузки («Состояние данных»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
+  // Coverage is graded, not a cliff: a window measured over 97 % of its length rests on data for
+  // 97 % of its length, and calling that «нет данных» is as wrong as calling it complete. The
+  // verdict is untouched — an incomplete window stays «недостаточно данных» and can never be
+  // recommended — so the score is capped below «высокая» while the gap is named in minutes.
+  const share=id=>id==='orbit'?orbitCoverage:factors[id]?.coverage??0;
+  const worst=missing.length?Math.min(...missing.map(share)):1;
+  const gap=minutes(Math.round((1-worst)*points.length));
+  add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',
+    worst>=1?4:worst>=0.9?2:worst>=0.5?1:0,
+    missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(share(id))}`).join('; ')}. Не оценено около ${gap} мин из ${minutes(points.length)}; окно остаётся «недостаточно данных», потому что отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
+    worst>=0.9?'Пробел короткий: пересчитайте после следующего обновления источников — чаще всего он закрывается сам':'Включите отключённые источники или дождитесь загрузки («Состояние данных»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
   const fresh=(score,detail,hint=null)=>({score,detail,hint});
   const goes=sources.find(s=>s.id==='noaa.swpc');
   let base;
@@ -154,5 +162,5 @@ export function assessV2(request,data){
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.5.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.6.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }

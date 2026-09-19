@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MockDataProvider, validateDataset } from '../dist/providers.js';
-import { computePlan, HOUR, orbitPoint, validateRequest, overlap } from '../dist/domain.js';
+import { computePlan, HOUR, orbitPoint, validateRequest, overlap, nextStartUTC } from '../dist/domain.js';
 import { zipFiles } from '../dist/export.js';
 const request={mode:'current',historyMode:'archive',start:'2026-09-19T10:00:00Z',duration:4,shift:12,cutoff:'2024-05-10T09:00:00Z',lightConstraint:false};
 const provider=new MockDataProvider();
@@ -17,3 +17,17 @@ test('partial coverage is penalized and visible',async()=>{const {plan:p}=await 
 test('UTC crossing midnight preserves duration and shift bounds',async()=>{const r={...request,start:'2026-09-19T23:30:00Z',duration:8,shift:24};const {plan:p}=await provider.calculate(r);for(const w of p.candidates){assert.equal(w.end-w.start,8*HOUR);assert(w.start>=Date.parse(r.start)&&w.start<=Date.parse(r.start)+24*HOUR);}assert.equal(new Date(p.original.end).toISOString(),'2026-09-20T07:30:00.000Z');});
 test('bounds and replay cutoff are validated',()=>{for(const change of [{duration:0},{duration:9},{shift:25},{shift:-1},{start:''},{duration:NaN},{mode:'history',historyMode:'replay',cutoff:'2027-01-01T00:00:00Z'}])assert.throws(()=>validateRequest({...request,...change}));assert.equal(overlap(0,10,10,20),0);});
 test('export is a valid ZIP STORE archive with UTF-8 JSON intact',async()=>{const input={'calculation.json':JSON.stringify({demo:true,text:'Проверка'})};const zip=new Uint8Array(await zipFiles(input).arrayBuffer());const view=new DataView(zip.buffer);assert.equal(view.getUint32(0,true),0x04034b50);const length=view.getUint32(18,true),nameLength=view.getUint16(26,true);assert.equal(new TextDecoder().decode(zip.slice(30+nameLength,30+nameLength+length)),input['calculation.json']);assert.equal(view.getUint32(zip.length-22,true),0x06054b50);});
+test('current mode plans forward: a time of day already gone means tomorrow',()=>{
+ const now=Date.parse('2026-09-19T19:37:00Z');
+ // The hour already running still counts as today; anything before it rolls over.
+ assert.equal(nextStartUTC('19:00',now),'2026-09-19T19:00:00Z');
+ assert.equal(nextStartUTC('19:30',now),'2026-09-19T19:30:00Z');
+ assert.equal(nextStartUTC('20:00',now),'2026-09-19T20:00:00Z');
+ assert.equal(nextStartUTC('01:00',now),'2026-09-20T01:00:00Z');
+ assert.equal(nextStartUTC('18:59',now),'2026-09-20T18:59:00Z');
+ // Midnight rollover must not produce an invalid date, and junk must not produce a start.
+ assert.equal(nextStartUTC('00:30',Date.parse('2026-12-31T23:10:00Z')),'2027-01-01T00:30:00Z');
+ for(const bad of ['','25:00','9:00',null,undefined])assert.equal(nextStartUTC(bad,now),'');
+ // Whatever it returns must be a start validateRequest accepts.
+ assert.doesNotThrow(()=>validateRequest({mode:'current',historyMode:'archive',start:nextStartUTC('01:00',now),duration:4,shift:12,cutoff:'2024-05-10T09:00:00Z',lightConstraint:false}));
+});

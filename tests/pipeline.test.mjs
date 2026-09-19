@@ -288,3 +288,20 @@ test('a window far from the element epoch lowers freshness and says why',async()
  assert.equal(stale.score,3);
  assert.match(stale.detail,/Орбита распространена на 41 ч/);
 });
+test('a nearly complete window is scored by how much is covered, not dropped to zero',async()=>{
+ const d=await buildDataset(request,[]);
+ const fill=()=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'observation',sepBound:false});};
+ const cov=()=>{const w=assessV2(request,d).original;return {score:w.confidence.criteria.find(c=>c.id==='coverage').score,status:w.status,coverage:w.factors.sep.coverage};};
+ fill();assert.deepEqual(cov(),{score:4,status:'acceptable',coverage:1});
+ // 97 % of the window measured: the verdict stays «недостаточно данных», the score does not.
+ const hole=d.profile.samples.filter(p=>p.t>=t&&p.t<t+3600000).slice(0,3);
+ for(const p of hole)p.sep=null;
+ const near=cov();
+ assert.equal(near.status,'insufficient');assert(near.coverage>0.95&&near.coverage<1);
+ assert.equal(near.score,2);
+ // Half the window missing is a different statement, and an empty mechanism is still zero.
+ fill();for(const p of d.profile.samples.filter((_,i)=>i%2===0))p.sep=null;
+ assert.equal(cov().score,1);
+ fill();for(const p of d.profile.samples)p.sep=null;
+ assert.equal(cov().score,0);
+});
