@@ -8,4 +8,5 @@ h5py
 matplotlib
 python-dateutil
 spacepy @ git+https://github.com/spacepy/spacepy@cb983af96e06265dc35463e0d725a11eaf0682a6
-netCDF4==1.7.2
+# 1.7.4 is the first release with Python 3.14 wheels.
+netCDF4==1.7.4

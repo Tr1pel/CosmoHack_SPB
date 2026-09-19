@@ -16,11 +16,14 @@ Then:  npm run pipeline:import -- records local/goes-history.json
 """
 import argparse
 import hashlib
+import http.client
 import json
 import math
 import re
 import sys
+import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -110,10 +113,31 @@ def records_from_file(path, fetched):
     return records
 
 
-def fetch(url):
-    request = urllib.request.Request(url, headers={'User-Agent': 'CosmoHack-research/2.0'})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read()
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def fetch(url, attempts=4, timeout=30):
+    """GET with retries: the archive server now and then stalls a connection."""
+    for attempt in range(1, attempts + 1):
+        try:
+            request = urllib.request.Request(url, headers={'User-Agent': 'CosmoHack-research/2.0'})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except (OSError, http.client.HTTPException) as error:
+            if attempt == attempts:
+                raise RuntimeError(f'{url}: {error}') from error
+            log(f'  повтор {attempt}/{attempts - 1} через {2 * attempt} с: {error}')
+            time.sleep(2 * attempt)
+
+
+def download(url, path):
+    started = time.monotonic()
+    data = fetch(url)
+    temp = path.with_suffix('.part')
+    temp.write_bytes(data)
+    temp.rename(path)
+    return len(data), time.monotonic() - started
 
 
 def archive_files(satellite, product, first, last, cache):
@@ -123,7 +147,10 @@ def archive_files(satellite, product, first, last, cache):
     wanted = {}
     for year, month in sorted({(d.year, d.month) for d in days}):
         url = ARCHIVE.format(sat=satellite, product=product, year=year, month=month)
-        listing = fetch(url).decode('utf-8', 'replace')
+        try:
+            listing = fetch(url).decode('utf-8', 'replace')
+        except RuntimeError as error:
+            sys.exit(f'список файлов архива недоступен ({error}); проверьте доступ к data.ngdc.noaa.gov и запустите ещё раз')
         for name, stamp, version in re.findall(rf'(sci_{product}_g{satellite}_d(\d{{8}})_v([\d-]+)\.nc)', listing):
             day = datetime.strptime(stamp, '%Y%m%d').date()
             key = tuple(int(x) for x in version.split('-'))
@@ -131,16 +158,23 @@ def archive_files(satellite, product, first, last, cache):
                 wanted[day] = (key, url + name, name)
     missing = [d.isoformat() for d in days if d not in wanted]
     if missing:
-        print(json.dumps({'missingDays': missing}), file=sys.stderr)
-    paths = []
-    for day in sorted(wanted):
-        _, url, name = wanted[day]
-        path = cache / name
-        if not path.exists():
-            temp = path.with_suffix('.part')
-            temp.write_bytes(fetch(url))
-            temp.rename(path)
-        paths.append(path)
+        log(f'нет в архиве: {", ".join(missing)}')
+    paths = [cache / wanted[day][2] for day in sorted(wanted)]
+    todo = [(day, wanted[day][1], cache / wanted[day][2]) for day in sorted(wanted) if not (cache / wanted[day][2]).exists()]
+    log(f'файлов за период: {len(paths)}, уже скачано: {len(paths) - len(todo)}, скачать: {len(todo)}')
+    failed = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        jobs = {pool.submit(download, url, path): day for day, url, path in todo}
+        for done, job in enumerate(as_completed(jobs), 1):
+            try:
+                size, seconds = job.result()
+                log(f'[{done}/{len(todo)}] {jobs[job]} · {size / 1e6:.2f} МБ · {seconds:.1f} с')
+            except RuntimeError as error:
+                failed.append(jobs[job].isoformat())
+                log(f'[{done}/{len(todo)}] {jobs[job]} не скачан: {error}')
+    if failed:
+        log(f'не скачаны: {", ".join(sorted(failed))}. Запустите ещё раз: скачанные файлы сохранены в {cache}.')
+        sys.exit(1)
     return paths
 
 
@@ -173,9 +207,17 @@ def main():
         return selftest()
     if not args.files and not (args.first and args.last):
         parser.error('give L2 files or --from and --to')
+    try:
+        import netCDF4  # checked before anything is downloaded
+    except ImportError:
+        sys.exit('нужен netCDF4: .venv/bin/pip install -r requirements-server.txt')
     paths = args.files or archive_files(args.satellite, args.product, args.first, args.last, args.cache)
     fetched = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    records = [r for path in paths for r in records_from_file(path, fetched)]
+    records = []
+    for done, path in enumerate(paths, 1):
+        records += records_from_file(path, fetched)
+        if done % 10 == 0 or done == len(paths):
+            log(f'обработано файлов: {done}/{len(paths)}')
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(records, allow_nan=False, separators=(',', ':')), encoding='utf-8')
     valid = sum(r['q'] == 'ok' for r in records)
