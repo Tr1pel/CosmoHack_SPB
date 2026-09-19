@@ -43,18 +43,30 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
   add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',missing.length?0:4,
     missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(factors[id]?.coverage??orbitCoverage)}`).join('; ')}. Окно не оценивается: отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
     'Включите отключённые источники или дождитесь загрузки («Состояние данных»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
+  const fresh=(score,detail,hint=null)=>({score,detail,hint});
   const goes=sources.find(s=>s.id==='noaa.swpc');
-  if(request.mode!=='current')add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',4,
+  let base;
+  if(request.mode!=='current')base=fresh(4,
     request.historyMode==='replay'?'Replay: взяты только выпуски, опубликованные до момента отсечения, — ровно то, что было известно тогда':'Архивный разбор: наблюдения относятся к самому периоду окна');
-  else if(!goes?.enabled||goes.status==='unavailable')add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',0,
+  else if(!goes?.enabled||goes.status==='unavailable')base=fresh(0,
     'GOES недоступен или отключён: свежего замера потока протонов нет','Включите источник GOES SGPS и нажмите «Обновить данные»');
   else{
     const age=finite(goes.ageMinutes)?goes.ageMinutes:null,cadence=goes.cadenceMinutes;
     const score=age===null?1:age<=2*cadence?4:age<=6*cadence?3:1;
-    add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',score,
+    base=fresh(score,
       age===null?'Возраст последнего замера GOES неизвестен':`Последний замер GOES получен ${Math.round(age)} мин назад при интервале публикации ${cadence} мин — ${score===4?'в пределах двух интервалов':score===3?'дольше двух интервалов, но данные ещё актуальны':'данные устарели'}`,
       'Нажмите «Обновить данные»: GOES публикует 5-минутные средние с задержкой 10–15 мин');
   }
+  // Orbit staleness answers the same question as measurement freshness — how well the data still
+  // describe the time being judged — so the window is scored by the weaker of the two. The
+  // reference notes elements age faster during a storm, which is why distance from epoch is shown.
+  const leads=points.filter(p=>finite(p.epoch)).map(p=>(p.t-p.epoch)/3600000);
+  const lead=leads.length?Math.max(...leads):null,warn=data.rules.orbit?.ageWarnHours,cap=data.rules.orbit?.maxPropagationHours;
+  const stale=lead!==null&&finite(warn)&&lead>warn;
+  add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени и насколько далеко от эпохи распространена орбита',
+    Math.min(base.score,stale?3:4),
+    stale?`${base.detail}. Орбита распространена на ${Math.round(lead)} ч от эпохи элементов${finite(cap)?` при пределе ${cap} ч`:''}: расхождение с точной эфемеридой от этого почти не растёт, но в геомагнитную бурю элементы устаревают быстрее обычного`:base.detail,
+    stale&&base.score>3?'Пересчитайте после следующего выпуска CelesTrak — элементы публикуются каждые 2 часа, и свежая эпоха отодвигает предел распространения':base.hint);
   const persisted=points.filter(p=>p.sepBasis==='persistence');
   if(!persisted.length)add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',4,
     request.mode==='current'?'Окно целиком до последнего замера GOES: поток измерен, прогноз не использовался':'Поток в окне измерен, прогноз не нужен');
@@ -142,5 +154,5 @@ export function assessV2(request,data){
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.4.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.5.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,mapProfile:data.mapProfile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }

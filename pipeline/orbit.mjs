@@ -3,11 +3,18 @@ import {shadowFraction} from 'satellite.js';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {ms} from './quality.mjs';
-export function orbitProfile(records,start,end,stepSeconds=30) {
+// How long one element set may be propagated. Measured against the NASA OEM precise ephemeris
+// (EME2000) on 19.09.2026: the discrepancy stays flat at 28-30 km mean out to 120 h from epoch —
+// that is the constant EME2000/TEME frame offset, not propagation drift — and only past 120 h does
+// it grow (270 km mean). The limit therefore bounds staleness, not accuracy, and the reference
+// warns that elements age faster during a storm, so the window age is reported in the confidence.
+export const DEFAULT_PROPAGATION_HOURS=24;
+export function orbitProfile(records,start,end,stepSeconds=30,maxPropagationHours=DEFAULT_PROPAGATION_HOURS) {
   const candidates=records.filter(r=>r.quantity==='omm').sort((a,b)=>ms(b.measuredAt)-ms(a.measuredAt));
+  const limit=maxPropagationHours*3600000;
   const satrecs=new Map(),samples=[];let selected=null;
   for(let t=start;t<=end;t+=stepSeconds*1000){
-    const record=candidates.find(r=>ms(r.measuredAt)<=t&&t-ms(r.measuredAt)<=86400000);
+    const record=candidates.find(r=>ms(r.measuredAt)<=t&&t-ms(r.measuredAt)<=limit);
     const point={t,lat:null,lon:null,alt:null,sunlit:null,orbitSourceId:null,epoch:null};
     if(record){try{
       if(!satrecs.has(record))satrecs.set(record,json2satrec(record.payload));

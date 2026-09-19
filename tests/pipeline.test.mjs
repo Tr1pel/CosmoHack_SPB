@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {Cache} from '../pipeline/cache.mjs';
 import {normalizeSeries,selectVersions,valueAt,coverageOf} from '../pipeline/quality.mjs';
 import {goes,hp30,hp30Forecast,swpcProbabilities,swpcAlerts,omm,nmdb,socrates,geoalert,parseCSV} from '../pipeline/adapters.mjs';
-import {orbitProfile,accessibleFlux,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from '../pipeline/orbit.mjs';
+import {orbitProfile,DEFAULT_PROPAGATION_HOURS,accessibleFlux,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from '../pipeline/orbit.mjs';
 import {grun,earthFactor} from '../pipeline/meteor.mjs';
 import {buildDataset} from '../pipeline/build.mjs';
 import {validateV2,assessV2,compareVector} from '../dist/pipeline.js';
@@ -260,4 +260,31 @@ test('a warning issued before the lookback still counts while its validity cover
  // Without the feed the answer is unknown, not "quiet".
  const blind=await buildDataset(current,[],{generatedAt:iso(t)});
  assert.equal(blind.profile.samples[0].sepWarning,null);
+});
+test('the propagation limit is a rule, so a whole 24-hour search stays covered',async()=>{
+ const records=omm(snap([elements],'celestrak.gp')),epoch=Date.parse('2024-05-10T09:00:00Z');
+ // Default: one day from epoch, as before.
+ assert.equal(DEFAULT_PROPAGATION_HOURS,24);
+ assert.equal(orbitProfile(records,epoch+25*3600000,epoch+25*3600000+30000).samples[0].lat,null);
+ // Raised: the same elements now reach the far end of a full search horizon.
+ assert.notEqual(orbitProfile(records,epoch+25*3600000,epoch+25*3600000+30000,30,72).samples[0].lat,null);
+ assert.equal(orbitProfile(records,epoch+73*3600000,epoch+73*3600000+30000,30,72).samples[0].lat,null);
+ // Elements 12 h old plus the largest request (8 h window, 24 h shift) must be covered end to end,
+ // and so must the map, which runs 24 h past the last candidate.
+ assert.equal(rules.orbit.maxPropagationHours>=12+8+24+24,true);
+ const late={mode:'current',historyMode:'archive',start:iso(epoch+12*3600000),duration:8,shift:24,cutoff:iso(epoch),lightConstraint:false};
+ const d=await buildDataset(late,records,{generatedAt:iso(epoch+12*3600000)});
+ assert(d.profile.samples.every(p=>p.lat!==null));
+ assert(d.mapProfile.samples.every(p=>p.lat!==null));
+ assert.equal((d.mapProfile.samples.at(-1).t-Date.parse(late.start))/3600000,late.shift+24);
+});
+test('a window far from the element epoch lowers freshness and says why',async()=>{
+ const records=omm(snap([elements],'celestrak.gp')),epoch=Date.parse('2024-05-10T09:00:00Z');
+ const near={mode:'history',historyMode:'archive',start:iso(epoch),duration:1,shift:0,cutoff:iso(epoch),lightConstraint:false};
+ const far={...near,start:iso(epoch+40*3600000)};
+ const at=async r=>{const d=await buildDataset(r,records);return assessV2(r,d).original.confidence.criteria.find(c=>c.id==='freshness');};
+ assert.equal((await at(near)).score,4);
+ const stale=await at(far);
+ assert.equal(stale.score,3);
+ assert.match(stale.detail,/Орбита распространена на 41 ч/);
 });

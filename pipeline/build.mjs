@@ -34,14 +34,15 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
       : ms(r.measuredAt)>=start-2*86400000&&ms(r.measuredAt)<=end+HOUR)&&
     (request.mode!=='current'||(ms(r.measuredAt)<=ms(generatedAt)&&(r.publishedAt===null||ms(r.publishedAt)<=ms(generatedAt)))));
   const visible=selectVersions(input,replay?cutoff:Infinity);
-  const series=normalizeSeries(visible),profile=orbitProfile(visible,start,end);
+  const propagation=rules.orbit?.maxPropagationHours;
+  const series=normalizeSeries(visible),profile=orbitProfile(visible,start,end,30,propagation);
   // The map can show 24 hours after any candidate, independently of the EVA duration.
   // Keep the same publication cutoff and orbital-element validity as the assessment.
   const mapEnd=start+(request.shift+24)*HOUR;
   const mapRecords=selectVersions(records.filter(r=>r.quantity==='omm'&&!disabled.includes(r.sourceId)&&
     ms(r.measuredAt)>=start-2*86400000&&ms(r.measuredAt)<=mapEnd&&
     (request.mode!=='current'||(ms(r.measuredAt)<=ms(generatedAt)&&(r.publishedAt===null||ms(r.publishedAt)<=ms(generatedAt))))),replay?cutoff:Infinity);
-  const mapProfile=orbitProfile(mapRecords,start,mapEnd);
+  const mapProfile=orbitProfile(mapRecords,start,mapEnd,30,propagation);
   const magnetic=disabled.includes('model.irbem')?{samples:[],error:'Модель отключена'}:await modelRunner(profile,python);
   const magneticByTime=new Map(magnetic.samples.map(p=>[p.t,p]));
   const hp=series.find(s=>s.quantity==='hp30'),protons=series.filter(s=>s.quantity==='proton_integral_flux');

@@ -46,6 +46,14 @@ cadenceMinutes, maxAgeMinutes, interpolation, samples. Отсчёт содерж
 Происхождение: `observation|external_forecast|own_computation|model|synthetic`.
 В реальном ответе не генерируется синтетическая замена отсутствующих данных.
 
+Один набор элементов распространяется не дальше `rules.orbit.maxPropagationHours`
+от своей эпохи (72 ч); за этим пределом отсчёт остаётся пробелом, а не
+достраивается. Предел ограничивает давность элементов, а не точность: сверка с
+точной эфемеридой NASA OEM показывает ровный сдвиг 28–30 км вплоть до 120 ч от
+эпохи. Окно, отстоящее от эпохи дальше `rules.orbit.ageWarnHours`, снижает
+критерий `freshness` до 3 с указанием, на сколько часов распространена орбита.
+`mapProfile` покрывает 24 ч после начала последнего кандидата.
+
 Профиль: t, lat/lon (градусы), alt (км), sunlit, orbitSourceId, epoch;
 магнитные поля L, B (нТл), magLat, rc (GV), ec (MeV), cutoff (`quiet|storm`), saa;
 значения sep (pfu), trapped (cm^-2 s^-1), ap8Min/ap8Max, ap8Floor, hp30,
