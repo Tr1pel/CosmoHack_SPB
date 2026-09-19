@@ -5,6 +5,7 @@ export const SOURCES=[
   {id:'noaa.swpc',name:'GOES SGPS',url:'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json',cadenceMinutes:5,factors:['sep'],modes:['current','history'],detail:'Интегральные протоны; публикация неизвестна'},
   {id:'gfz.hp30',name:'GFZ Hp30',url:'https://kp.gfz.de/app/json/',cadenceMinutes:30,factors:['sep'],modes:['current','history'],detail:'Hp30; смешанные ревизии, без времени публикации'},
   {id:'gfz.hp30.forecast',name:'GFZ Hp30 forecast',url:'https://spaceweather.gfz.de/fileadmin/SW-Monitor/hp30_product_file_FORECAST_HP30_SWIFT_DRIVEN_LAST.json',cadenceMinutes:60,factors:['sep'],modes:['current'],detail:'Ансамблевый прогноз Hp30 на 3 суток; для обрезания берётся максимум ансамбля'},
+  {id:'noaa.swpc.forecast',name:'NOAA SWPC 3-day forecast',url:'https://services.swpc.noaa.gov/text/3-day-forecast.txt',cadenceMinutes:720,factors:['sep'],modes:['current'],detail:'Вероятность радиационной бури S1+ (≥ 10 pfu при ≥ 10 МэВ) по суткам на 3 суток; время выпуска из заголовка'},
   {id:'celestrak.gp',name:'CelesTrak GP',url:'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=json',cadenceMinutes:120,factors:['orbit'],modes:['current'],detail:'NORAD 25544; EPOCH не является публикацией'},
   {id:'spacetrack.history',name:'Space-Track GP history',url:'https://www.space-track.org/',cadenceMinutes:480,factors:['orbit'],modes:['history'],detail:'Однократный локальный импорт OMM с CREATION_DATE'},
   {id:'nmdb',name:'NMDB OULU / ROME',url:'https://www.nmdb.eu/nest/draw_graph.php',cadenceMinutes:60,factors:['gcr'],modes:['current','history'],detail:'Нейтронные мониторы; фон на Земле, не поток у МКС'},
@@ -49,4 +50,20 @@ export const DOCKED_MAX_RELATIVE_KMS=0.01;
 export function socrates(snapshot){const rows=parseCSV(snapshot.raw);if(!rows.length||!('NORAD_CAT_ID_1' in rows[0]))throw new Error('Unknown SOCRATES CSV schema');return rows.filter(r=>[r.NORAD_CAT_ID_1,r.NORAD_CAT_ID_2].some(x=>Number(x)===25544)&&!(Number(r.TCA_RELATIVE_SPEED)<DOCKED_MAX_RELATIVE_KMS)).map(r=>record(snapshot,{seriesId:'socrates.iss',instrument:'NORAD/25544',recordId:`${r.NORAD_CAT_ID_1}-${r.NORAD_CAT_ID_2}-${r.TCA}`,measuredAt:snapshot.fetchedAt,quantity:'conjunction',objectId:25544,start:ms(dateUTC(r.TCA))-30*60000,end:ms(dateUTC(r.TCA))+30*60000,tca:ms(dateUTC(r.TCA)),value:Number(r.TCA_RANGE),unit:'km',provenance:'external_forecast',payload:r}));}
 export function donki(snapshot){return JSON.parse(snapshot.raw).map(r=>record(snapshot,{seriesId:'donki.notifications',instrument:'CCMC',recordId:r.messageID,measuredAt:dateUTC(r.messageIssueTime),publishedAt:dateUTC(r.messageIssueTime),quantity:'notification',provenance:'external_forecast',payload:r}));}
 export function geoalert(snapshot){const match=snapshot.raw.match(/:Issued:\s*(\d{4})\s+(\w{3})\s+(\d{1,2})\s+(\d{2})(\d{2})\s+UTC/i);if(!match)throw new Error('NCEI issue time missing; filename is not publication time');const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const publishedAt=iso(Date.UTC(+match[1],months.findIndex(m=>m.toLowerCase()===match[2].toLowerCase()),+match[3],+match[4],+match[5]));return [record(snapshot,{seriesId:'ncei.geoalert',instrument:'SWPC',measuredAt:publishedAt,publishedAt,quantity:'bulletin',provenance:'external_forecast',payload:snapshot.raw})];}
+const MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'],month=m=>MONTHS.indexOf(m.toLowerCase());
+// SWPC 3-day forecast: the forecasters' probability of an S1+ radiation storm (>= 10 pfu at
+// >= 10 MeV) for each UTC day. The header carries the issue time, the columns month and day only.
+export function swpcForecast(snapshot){
+  const issued=snapshot.raw.match(/:Issued:\s*(\d{4})\s+(\w{3})\s+(\d{1,2})\s+(\d{2})(\d{2})\s+UTC/i);
+  const lines=snapshot.raw.split(/\r?\n/),at=lines.findIndex(l=>/^Solar Radiation Storm Forecast for/i.test(l.trim()));
+  const after=at<0?[]:lines.slice(at+1),header=after.find(l=>l.trim())??'',row=after.find(l=>/^\s*S1 or greater/i.test(l))??'';
+  const days=[...header.matchAll(/([A-Za-z]{3})\s+(\d{1,2})/g)],values=[...row.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map(m=>Number(m[1]));
+  if(!issued||month(issued[2])<0||days.length!==3||values.length!==3||days.some(d=>month(d[1])<0))throw new Error('SWPC 3-day forecast format changed');
+  const publishedAt=Date.UTC(+issued[1],month(issued[2]),+issued[3],+issued[4],+issued[5]);
+  return days.map(([,m,d],i)=>{
+    // The year is the one that puts the day next to the issue date: forecasts cross New Year.
+    const start=[-1,0,1].map(k=>Date.UTC(+issued[1]+k,month(m),+d)).sort((a,b)=>Math.abs(a-publishedAt)-Math.abs(b-publishedAt))[0];
+    return record(snapshot,{seriesId:'swpc.s1.probability',instrument:'SWPC',recordId:`${iso(publishedAt)}/${iso(start).slice(0,10)}`,measuredAt:iso(publishedAt),publishedAt:iso(publishedAt),quantity:'sep_event_probability',unit:'%',provenance:'external_forecast',start,end:start+86400000,value:values[i],payload:{issued:iso(publishedAt),day:iso(start).slice(0,10),line:row.trim()}});
+  });
+}
 export function nmdbURL(start,end){const u=new URL(SOURCES.find(s=>s.id==='nmdb').url);for(const [k,v] of Object.entries({formchk:1,output:'ascii',dtype:'corr_for_efficiency',tabchoice:'revori',tresolution:60,yunits:0,date_choice:'bydate'}))u.searchParams.set(k,v);for(const station of ['OULU','ROME'])u.searchParams.append('stations[]',station);for(const [prefix,t] of [['start',start],['end',end]]){const d=new Date(t);for(const [k,v] of Object.entries({year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate(),hour:d.getUTCHours(),min:d.getUTCMinutes()}))u.searchParams.set(`${prefix}_${k}`,v);}return u.href;}

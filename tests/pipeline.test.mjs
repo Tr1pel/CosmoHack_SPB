@@ -60,7 +60,7 @@ test('accessible spectrum never extrapolates beyond measured energy',()=>{
  const c=[{energy:10,value:100},{energy:100,value:1}];assert(Math.abs(accessibleFlux(c,Math.sqrt(1000))-10)<1e-10);assert.equal(accessibleFlux(c,500),null);assert.equal(accessibleFlux([{energy:10,value:null}],10),null);
 });
 test('empty live dataset validates and never recommends shifting into missing data',async()=>{
- const d=validateV2(await buildDataset(request,[]));assert.equal(d.sources.length,11);const plan=assessV2(request,d);assert.equal(plan.outcome,'insufficient');assert.equal(plan.improvement,false);assert.equal(plan.recommended.confidence.level,'low');assert.equal(plan.original.factors.sep.value,null);
+ const d=validateV2(await buildDataset(request,[]));assert.equal(d.sources.length,12);const plan=assessV2(request,d);assert.equal(plan.outcome,'insufficient');assert.equal(plan.improvement,false);assert.equal(plan.recommended.confidence.level,'low');assert.equal(plan.original.factors.sep.value,null);
  const bad=structuredClone(d);bad.profile.samples[0].sep=NaN;assert.throws(()=>validateV2(bad));
  assert.equal(compareVector([0,1,100000],[1,0,0]),-1);
 });
@@ -168,4 +168,27 @@ test('cache parses each immutable record file once',async()=>{
  try{const c=new Cache(root);await c.append([record()]);let reads=0;const read=c.read.bind(c);c.read=(...a)=>{reads++;return read(...a);};
   assert.equal((await c.records()).length,1);assert.equal((await c.records()).length,1);assert.equal(reads,1);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+test('confidence scores each criterion 0-4 and takes the weakest; a measured window reaches high',async()=>{
+ const d=await buildDataset(request,[]);
+ const fill=extra=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'observation',sepBound:false,...extra});};
+ const at=id=>assessV2(request,d).original.confidence.criteria.find(c=>c.id===id).score;
+ fill();
+ const w=assessV2(request,d).original;
+ assert.equal(w.confidence.score,4);assert.equal(w.confidence.level,'high');
+ assert.equal(w.confidence.score,Math.min(...w.confidence.criteria.map(c=>c.score)));
+ // A storm puts the cutoff model outside its quiet-dipole regime; an upper bound is only a caveat.
+ fill({cutoff:'storm'});assert.equal(at('model'),2);assert.equal(assessV2(request,d).original.confidence.level,'medium');
+ fill({sepBound:true});assert.equal(at('model'),3);assert.equal(assessV2(request,d).original.confidence.level,'high');
+ // Missing coverage of a decision mechanism is 0 regardless of every other criterion.
+ fill({trapped:null});assert.equal(at('coverage'),0);assert.equal(assessV2(request,d).original.confidence.level,'low');
+});
+test('the persistence baseline never scores above 2, and without a SWPC issue it scores 0',async()=>{
+ const current={...request,mode:'current'};
+ const d=await buildDataset(current,[],{generatedAt:iso(t)});
+ for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'persistence',sepObservedAt:t,sepBound:false,sepEventProbability:1});
+ const basis=()=>assessV2(current,d).original.confidence.criteria.find(c=>c.id==='forecast').score;
+ assert.equal(basis(),2);
+ for(const p of d.profile.samples)p.sepEventProbability=40;assert.equal(basis(),1);
+ for(const p of d.profile.samples)p.sepEventProbability=null;assert.equal(basis(),0);
 });
