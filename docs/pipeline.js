@@ -19,6 +19,58 @@ export function validateV2(data,disabled=[]) {
   for(const g of data.gaps)if(!ids.includes(g.sourceId)||!finite(g.start)||!finite(g.end)||g.end<=g.start)fail();
   return {...data,sources:data.sources.map(s=>({...s,enabled:s.enabled&&!disabled.includes(s.id)}))};
 }
+// Credibility of the window assessment, scored the way NASA-STD-7009 scores a model result:
+// each factor gets 0-4 against stated evidence and the summary score is the MINIMUM of the
+// factors, so one weak link is never averaged away. As in the standard, the score does not
+// measure safety — it measures how far the answer rests on measurement instead of assumption.
+// 4 measured · 3 measured with a named model caveat · 2 baseline forecast confirmed by an
+// independent issue · 1 unconfirmed forecast or stale data · 0 no evidence for this window.
+export const SCORE_MAX=4;
+export const scoreLevel=score=>score>=3?'high':score===2?'medium':'low';
+function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage,decision,step}){
+  const name=id=>data.factors.find(f=>f.id===id)?.name??'Орбита',percent=x=>`${Math.round(x*100)} %`,minutes=n=>Math.round(n*step/60),hhmm=t=>new Date(t).toISOString().slice(11,16);
+  const criteria=[],add=(id,label,measures,score,detail,hint)=>criteria.push({id,label,measures,score,level:scoreLevel(score),detail,hint:score>=SCORE_MAX?null:hint});
+  add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',missing.length?0:4,
+    missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(factors[id]?.coverage??orbitCoverage)}`).join('; ')}. Окно не оценивается: отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
+    'Включите отключённые источники или дождитесь загрузки («Источники и происхождение»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
+  const goes=sources.find(s=>s.id==='noaa.swpc');
+  if(request.mode!=='current')add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',4,
+    request.historyMode==='replay'?'Replay: взяты только выпуски, опубликованные до момента отсечения, — ровно то, что было известно тогда':'Архивный разбор: наблюдения относятся к самому периоду окна');
+  else if(!goes?.enabled||goes.status==='unavailable')add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',0,
+    'GOES недоступен или отключён: свежего замера потока протонов нет','Включите источник GOES SGPS и нажмите «Обновить данные»');
+  else{
+    const age=finite(goes.ageMinutes)?goes.ageMinutes:null,cadence=goes.cadenceMinutes;
+    const score=age===null?1:age<=2*cadence?4:age<=6*cadence?3:1;
+    add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени',score,
+      age===null?'Возраст последнего замера GOES неизвестен':`Последний замер GOES получен ${Math.round(age)} мин назад при интервале публикации ${cadence} мин — ${score===4?'в пределах двух интервалов':score===3?'дольше двух интервалов, но данные ещё актуальны':'данные устарели'}`,
+      'Нажмите «Обновить данные»: GOES публикует 5-минутные средние с задержкой 10–15 мин');
+  }
+  const persisted=points.filter(p=>p.sepBasis==='persistence');
+  if(!persisted.length)add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',4,
+    request.mode==='current'?'Окно целиком до последнего замера GOES: поток измерен, прогноз не использовался':'Поток в окне измерен, прогноз не нужен');
+  else{
+    const since=Math.min(...persisted.map(p=>p.sepObservedAt).filter(finite)),probabilities=persisted.map(p=>p.sepEventProbability);
+    const known=probabilities.every(finite),peak=known?Math.max(...probabilities):null,limit=data.rules.confidence?.sepForecastMaxPercent;
+    // The baseline forecast is capped at 2 even when SWPC agrees: persistence cannot predict an onset.
+    const score=known?(finite(limit)&&peak<=limit?2:1):0;
+    add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',score,
+      `${minutes(persisted.length)} мин окна после последнего замера GOES${finite(since)?` (${hhmm(since)} UTC)`:''} достроены базовым прогнозом «последнее наблюдение сохраняется». ${known?`SWPC независимо оценивает вероятность бури S1+ в эти сутки до ${peak} %${score===1&&finite(limit)?` — это выше допустимых ${limit} %`:' — прогноз подтверждён'}`:'Прогноза SWPC на эти сутки нет, подтвердить прогноз нечем'}`,
+      score===2?`Выше 2 из ${SCORE_MAX} такое окно не поднимается: начало события прогноз «как сейчас» не предсказывает (справочник, §6.4). Пересчитайте ближе к выходу — каждый замер GOES сокращает прогнозную часть, а окно целиком в прошлом получает 4`:known?'SWPC допускает радиационную бурю: пересчитайте ближе к выходу и следите за уведомлениями DONKI':'Обновите данные: SWPC выпускает прогноз на 3 суток в 00:30 и 12:30 UTC');
+  }
+  const storm=points.filter(p=>p.cutoff==='storm').length,bounded=points.filter(p=>p.sepBound).length,index=data.rules.cutoff?.storm?.indexThreshold??5;
+  add('model','Применимость моделей','Работают ли модели обрезания и потока в своей области применимости',storm?2:bounded?3:4,
+    (storm?`Hp30 ≥ ${index} в ${minutes(storm)} мин окна: экран ослаблен, применена эмпирическая параметризация CARI-7A — главная модельная неопределённость SEP`:'Геомагнитно спокойно: обрезание по дипольной формуле Штёрмера, модель в своей области применимости')+(bounded?`; в ${minutes(bounded)} мин поток — оценка сверху (выше 500 МэВ GOES не измеряет), поэтому вывод «ниже порога» от этого только надёжнее`:''),
+    storm?'Сравните с окнами вне бури — строка «Геомагнитная буря» в режиме «Обстановка»':'Оценка сверху снимается только измерением спектра выше 500 МэВ; для вывода «ниже порога» она безопасна');
+  const gaps=mechanisms.filter(id=>!decision.includes(id)&&factors[id].coverage<1);
+  // A context source outside its mode (SOCRATES has no archive) is a declared limit of scope,
+  // not a failure: it caps the score at 3, while a source that should work and does not caps at 2.
+  const broken=sources.filter(s=>s.applicable!==false&&(!s.enabled||s.status!=='fresh')&&s.factors?.some(f=>gaps.includes(f)));
+  add('context','Контекст: ГКЛ и сближения','Посчитаны ли механизмы, которые показываются, но выбор окна не блокируют',!gaps.length?4:broken.length?2:3,
+    !gaps.length?'Сближения проверены по экрану SOCRATES, фон ГКЛ рассчитан на всё окно':`${gaps.map(id=>`${name(id)} — ${percent(factors[id].coverage)} покрытия`).join('; ')}. ${broken.length?`Источник не отвечает или отключён: ${broken.map(s=>s.name).join(', ')}`:'Это заявленная граница охвата, а не отказ источника: экран SOCRATES существует только в текущем режиме и на 7 суток от своего выпуска'}`,
+    broken.length?'Включите источник в разделе «Источники и происхождение» и обновите данные':'Полное покрытие контекста возможно только в текущем режиме внутри 7 суток от выпуска SOCRATES; на выбор окна это не влияет');
+  const score=Math.min(...criteria.map(c=>c.score));
+  return {score,level:scoreLevel(score),limiting:criteria.filter(c=>c.score===score).map(c=>c.id),criteria};
+}
 export function compareVector(a,b){for(let i=0;i<a.length;i++){if(a[i]<b[i])return -1;if(a[i]>b[i])return 1;}return 0;}
 export function assessV2(request,data){
   const start=Date.parse(request.start),duration=request.duration*3600000,step=data.profile.stepSeconds;
@@ -59,16 +111,17 @@ export function assessV2(request,data){
     const digits=data.rules.ranking?.sepSignificantDigits,sep=factors.sep.value===null?Infinity:digits?Number(factors.sep.value.toPrecision(digits)):factors.sep.value;
     const rank=[missing.length,missing.length||warnings.length?1:0,decision.filter(id=>factors[id].status==='review').length,sep,saaMinutes??Infinity,warnings.filter(e=>e.factor==='ops').length];
     if(request.lightConstraint)rank.push(lightMinutes===null?Infinity:duration/60000-lightMinutes);
-    return {id:i===0?'A':`C${i}`,start:t,end,factors,missing,gaps:data.gaps.filter(g=>g.start<end&&g.end>t),warnings,lightMinutes,saaMinutes,rank,confidence:{level:missing.length||persisted.length?'low':'medium',reasons},status:missing.length?'insufficient':warnings.length?'review':'acceptable',incomplete:missing.length>0,weather:missing.some(id=>['sep','trapped','gcr'].includes(id))?'Нет данных':warnings.some(e=>['sep','trapped','gcr'].includes(e.factor))?'Требует проверки':'Низкий прокси',conjunction:factors.ops.coverage<1?'Нет полного экрана':warnings.some(e=>e.factor==='ops')?'Есть пересечение':'Нет пересечений'};
+    const confidence={...confidenceOf({request,data,sources,points,factors,missing,orbitCoverage,decision,step}),reasons};
+    return {id:i===0?'A':`C${i}`,start:t,end,factors,missing,gaps:data.gaps.filter(g=>g.start<end&&g.end>t),warnings,lightMinutes,saaMinutes,rank,confidence,status:missing.length?'insufficient':warnings.length?'review':'acceptable',incomplete:missing.length>0,weather:missing.some(id=>['sep','trapped','gcr'].includes(id))?'Нет данных':warnings.some(e=>['sep','trapped','gcr'].includes(e.factor))?'Требует проверки':'Низкий прокси',conjunction:factors.ops.coverage<1?'Нет полного экрана':warnings.some(e=>e.factor==='ops')?'Есть пересечение':'Нет пересечений'};
   }
   const candidates=Array.from({length:request.shift+1},(_,i)=>assess(start+i*3600000,i));
   const ranked=[...candidates].sort((a,b)=>compareVector(a.rank,b.rank)||a.start-b.start),recommended=ranked[0];
   ranked.forEach((w,i)=>{w.position=i+1;});
-  // Best windows: every good one (up to three shown first); without a good window, the two best anyway.
-  const good=ranked.filter(w=>w.status==='acceptable'),best=good.length?good.slice(0,3):ranked.slice(0,2);
+  // Best windows: every good one in the order of choice; without a good window, the two best anyway.
+  const good=ranked.filter(w=>w.status==='acceptable'),best=good.length?good:ranked.slice(0,2);
   const alternative=recommended.start!==start?recommended:ranked.find(w=>w.start!==start)??null;if(alternative)alternative.id='B';
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.1.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.3.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }

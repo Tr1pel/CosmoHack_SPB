@@ -1,5 +1,5 @@
 import {readFile} from 'node:fs/promises';
-import {SOURCES,DOCKED_MAX_RELATIVE_KMS,goes,hp30,hp30Forecast,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
+import {SOURCES,DOCKED_MAX_RELATIVE_KMS,goes,hp30,hp30Forecast,swpcForecast,omm,nmdb,socrates,donki,geoalert,nmdbURL} from './adapters.mjs';
 import {normalizeSeries,selectVersions,valueAt,coverageOf,validateMeteorTable,ms,iso} from './quality.mjs';
 import {orbitProfile,magneticProfile,accessibleFluxBound,cutoffRigidity,cutoffEnergy} from './orbit.mjs';
 import {validateRequest,HOUR} from '../dist/domain.js';
@@ -10,7 +10,7 @@ export async function collect(cache,request,disabled=[]){
   const start=ms(request.start),end=start+(request.duration+request.shift)*HOUR;
   const jobs=[];const add=(id,url,adapter,ttl)=>{if(!disabled.includes(id))jobs.push({id,url,adapter,ttl});};
   if(request.mode==='current'){
-    for(const [id,adapter,ttl] of [['noaa.swpc',goes,5],['celestrak.gp',omm,120],['celestrak.socrates',socrates,480],['gfz.hp30.forecast',hp30Forecast,60]])add(id,SOURCES.find(s=>s.id===id).url,adapter,ttl);
+    for(const [id,adapter,ttl] of [['noaa.swpc',goes,5],['celestrak.gp',omm,120],['celestrak.socrates',socrates,480],['gfz.hp30.forecast',hp30Forecast,60],['noaa.swpc.forecast',swpcForecast,60]])add(id,SOURCES.find(s=>s.id===id).url,adapter,ttl);
   }
   add('gfz.hp30',`https://kp.gfz.de/app/json/?start=${iso(start-2*HOUR).slice(0,19)}Z&end=${iso(end).slice(0,19)}Z&index=Hp30`,hp30,30);
   add('nmdb',nmdbURL(start-2*HOUR,end),nmdb,60);
@@ -41,14 +41,17 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
   const lastSample=Object.fromEntries(instruments.map(i=>[i,Math.max(...protons.filter(s=>s.instrument===i).flatMap(s=>s.samples.filter(x=>x.q==='ok').map(x=>x.t)))]));
   const persistence=request.mode==='current'?rules.sep.persistence.maxHours*HOUR:0;
   const forecasts=request.mode==='current'?visible.filter(r=>r.quantity==='hp30_forecast'&&Number.isFinite(r.value)).sort((a,b)=>ms(b.measuredAt)-ms(a.measuredAt)):[];
+  // The latest SWPC issue per UTC day: an independent check of the persistence baseline.
+  const outlooks=request.mode==='current'?visible.filter(r=>r.quantity==='sep_event_probability'&&Number.isFinite(r.value)).sort((a,b)=>ms(b.publishedAt)-ms(a.publishedAt)):[];
   // SOCRATES screens the next days from its run: the latest snapshot bounds the screened span.
   // Records cached before the adapter filtered docked vehicles are dropped here as well.
   const conjunctions=visible.filter(r=>r.quantity==='conjunction'&&r.objectId===25544&&Number.isFinite(r.start)&&Number.isFinite(r.end)&&Number.isFinite(r.value)&&!(Number(r.payload?.TCA_RELATIVE_SPEED)<DOCKED_MAX_RELATIVE_KMS));
   const screenedAt=request.mode==='current'?Math.max(-Infinity,...outcomes.filter(o=>o.id==='celestrak.socrates'&&o.ok).map(o=>ms(o.fetchedAt)),...conjunctions.map(r=>ms(r.measuredAt))):-Infinity;
   const screenedUntil=screenedAt+rules.ops.screenHorizonDays*86400000;
   for(const p of profile.samples){
-    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,hp30Forecast:null,L:null,B:null,magLat:null,rc:null,ec:null,cutoff:null,saa:null,sep:null,sepBasis:null,sepBound:null,sepObservedAt:null,trapped:null,gcr:null,meteor:null,ops:null});
+    const m=magneticByTime.get(p.t);Object.assign(p,{hp30:hp?valueAt(hp,p.t):null,hp30Forecast:null,L:null,B:null,magLat:null,rc:null,ec:null,cutoff:null,saa:null,sep:null,sepBasis:null,sepBound:null,sepObservedAt:null,sepEventProbability:null,trapped:null,gcr:null,meteor:null,ops:null});
     if(p.hp30===null)p.hp30Forecast=forecasts.find(r=>r.start<=p.t&&p.t<r.end)?.value??null;
+    p.sepEventProbability=outlooks.find(r=>r.start<=p.t&&p.t<r.end)?.value??null;
     if(m&&p.lat!==null){p.L=m.L;p.B=m.B;p.magLat=m.magLat??null;p.ap8Min=m.ap8Min;p.ap8Max=m.ap8Max;p.ap8Floor=m.ap8Floor??null;p.saa=Number.isFinite(m.B)&&Number.isFinite(m.L)?m.B<rules.saa.maxBNt&&m.L<rules.saa.maxL:null;
       if(Number.isFinite(m.ap8Max)&&Number.isFinite(m.ap8Min)&&m.ap8Max>=0&&m.ap8Min>=0)p.trapped=Math.max(m.ap8Min,m.ap8Max);
       const shield=cutoffRigidity(p.magLat,p.alt,p.hp30??p.hp30Forecast,rules.cutoff);
@@ -79,14 +82,14 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
     // A successful response without records (quiet DONKI days) is fresh data, not a failure.
     let status=rows.length||result.some(o=>o.ok)?'fresh':'unavailable',detail=s.detail;
     // GOES 5-minute averages appear ~10-15 minutes late and are cached for 5 minutes.
-    const ageLimit={'noaa.swpc':30,'gfz.hp30':60,'gfz.hp30.forecast':360,'nmdb':120,'celestrak.gp':1440,'celestrak.socrates':480}[s.id];
+    const ageLimit={'noaa.swpc':30,'gfz.hp30':60,'gfz.hp30.forecast':360,'noaa.swpc.forecast':1440,'nmdb':120,'celestrak.gp':1440,'celestrak.socrates':480}[s.id];
     const latestMeasured=rows.reduce((n,r)=>Math.max(n,ms(r.measuredAt)),-Infinity);
     const ageMinutes=Number.isFinite(latestMeasured)?Math.max(0,(ms(generatedAt)-latestMeasured)/60000):null;
     if(request.mode==='current'&&ageLimit&&ageMinutes!==null&&ageMinutes>ageLimit)status='stale';
     if(result.some(o=>!o.ok)){status=rows.length?'stale':'unavailable';detail+='; '+result.filter(o=>!o.ok).map(o=>o.error).join('; ');}
     if(s.id==='model.irbem'){status=magnetic.samples.length?'fresh':'unavailable';detail=magnetic.error??magnetic.model;}
     if(s.id==='nasa.meo')status=profile.samples.some(p=>p.meteor!==null)?'fresh':'unavailable';
-    return {...s,status,applicable:modes.includes(request.mode),ageMinutes,enabled:!disabled.includes(s.id),publishedAt:publication,lastSuccess:last??result.find(o=>o.ok)?.fetchedAt??null,version:rows.at(-1)?.sourceVersion??result.find(o=>o.ok)?.version??(s.id==='model.irbem'?magnetic.version:null)??'unavailable',provenance:s.id.startsWith('model.')||s.id==='nasa.meo'||s.factors.includes('orbit')?'model':['celestrak.socrates','gfz.hp30.forecast'].includes(s.id)?'external_forecast':'observation',replayEligible:rows.some(r=>r.publishedAt!==null),detail};
+    return {...s,status,applicable:modes.includes(request.mode),ageMinutes,enabled:!disabled.includes(s.id),publishedAt:publication,lastSuccess:last??result.find(o=>o.ok)?.fetchedAt??null,version:rows.at(-1)?.sourceVersion??result.find(o=>o.ok)?.version??(s.id==='model.irbem'?magnetic.version:null)??'unavailable',provenance:s.id.startsWith('model.')||s.id==='nasa.meo'||s.factors.includes('orbit')?'model':['celestrak.socrates','gfz.hp30.forecast','noaa.swpc.forecast'].includes(s.id)?'external_forecast':'observation',replayEligible:rows.some(r=>r.publishedAt!==null),detail};
   });
   const coverage=Object.fromEntries(series.map(s=>[s.id,coverageOf(s,start,end)]));
   const gaps=Object.entries(coverage).flatMap(([id,c])=>c.gaps.map(g=>({...g,seriesId:id,sourceId:series.find(s=>s.id===id).sourceId,publishedAt:null,reason:'Нет валидного отсчёта в пределах допустимого возраста'})));
@@ -105,7 +108,7 @@ export async function buildDataset(request,records,{disabled=[],outcomes=[],pyth
   return {schemaVersion:2,demo:false,generatedAt,sources,series,profile,factors:FACTORS,events,gaps,coverage,rules,orbit:{epoch:profile.epoch,model:profile.propagator,format:'OMM',objectId:25544},context:visible.filter(r=>['notification','bulletin'].includes(r.quantity)),limitations:[
     'Исследовательские прокси, не расчёт дозы и не допуск к ВКД.',rules.cutoff.limitation,
     `SEP: интегральный поток GOES выше max(Ec, ${rules.suitEnergyMeV} МэВ). Спектр не экстраполируется: выше последнего канала и без геомагнитного индекса берётся верхняя оценка.`,
-    ...(persistence?[`После последнего замера GOES — базовый прогноз «последнее наблюдение сохраняется» (до ${rules.sep.persistence.maxHours} ч): начало события он не предсказывает; для будущих часов обрезание по прогнозу Hp30 GFZ.`]:[]),
+    ...(persistence?[`После последнего замера GOES — базовый прогноз «последнее наблюдение сохраняется» (до ${rules.sep.persistence.maxHours} ч): начало события он не предсказывает; для будущих часов обрезание по прогнозу Hp30 GFZ. Уверенность таких окон не выше средней и только если SWPC оценивает вероятность бури S1+ не выше ${rules.confidence.sepForecastMaxPercent} %.`]:[]),
     'AP-8 — климатологическая модель; ниже нижнего уровня карты (1 см⁻²с⁻¹) поток равен 0; граница ЮАА исследовательская.',
     `ГКЛ — относительный прокси: доля межпланетного потока выше обрезания, солнечная модуляция не учтена (её показывает NMDB). Сближения — экран SOCRATES top-N на ${rules.ops.screenHorizonDays} сут; пристыкованные корабли исключены, отсутствие находок не доказывает отсутствие сближений. Оба механизма — контекст: выбор окна не блокируют.`,
     'Метеороиды: фон по модели Грюна с поправками на Землю × граница усиления потоков NASA MEO; окна Геминид не оцениваются.',
