@@ -185,26 +185,28 @@ test('cache parses each immutable record file once',async()=>{
   assert.equal((await c.records()).length,1);assert.equal((await c.records()).length,1);assert.equal(reads,1);
  }finally{await rm(root,{recursive:true,force:true});}
 });
-test('confidence scores each criterion 0-4 and takes the weakest; a measured window reaches high',async()=>{
+test('confidence scores each criterion 0-8 and takes the weakest; a measured window reaches high',async()=>{
  const d=await buildDataset(request,[]);
  const fill=extra=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'observation',sepBound:false,...extra});};
  const at=id=>assessV2(request,d).original.confidence.criteria.find(c=>c.id===id).score;
  fill();
  const w=assessV2(request,d).original;
- assert.equal(w.confidence.score,4);assert.equal(w.confidence.level,'high');
+ assert.equal(w.confidence.score,8);assert.equal(w.confidence.level,'high');
  assert.equal(w.confidence.score,Math.min(...w.confidence.criteria.map(c=>c.score)));
  // A storm puts the cutoff model outside its quiet-dipole regime; an upper bound is only a caveat.
- fill({cutoff:'storm'});assert.equal(at('model'),2);assert.equal(assessV2(request,d).original.confidence.level,'medium');
- fill({sepBound:true});assert.equal(at('model'),3);assert.equal(assessV2(request,d).original.confidence.level,'high');
+ fill({cutoff:'storm'});assert.equal(at('model'),4);assert.equal(assessV2(request,d).original.confidence.level,'medium');
+ fill({sepBound:true});assert.equal(at('model'),6);assert.equal(assessV2(request,d).original.confidence.level,'high');
  // Missing coverage of a decision mechanism is 0 regardless of every other criterion.
  fill({trapped:null});assert.equal(at('coverage'),0);assert.equal(assessV2(request,d).original.confidence.level,'low');
 });
-test('the persistence baseline never scores above 2, and without a SWPC issue it scores 0',async()=>{
+test('the persistence baseline is graded by lead time, capped at 4, and needs SWPC confirmation',async()=>{
  const current={...request,mode:'current'};
  const d=await buildDataset(current,[],{generatedAt:iso(t)});
  for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'persistence',sepObservedAt:t,sepBound:false,sepEventProbability:1});
  const basis=()=>assessV2(current,d).original.confidence.criteria.find(c=>c.id==='forecast').score;
- assert.equal(basis(),2);
+ assert.equal(basis(),4);assert.equal(assessV2(current,d).original.confidence.forecastLeadHours,0);
+ for(const p of d.profile.samples)p.sepObservedAt=t-5*3600000;assert.equal(basis(),3);
+ for(const p of d.profile.samples)p.sepObservedAt=t-10*3600000;assert.equal(basis(),2);
  for(const p of d.profile.samples)p.sepEventProbability=40;assert.equal(basis(),1);
  for(const p of d.profile.samples)p.sepEventProbability=null;assert.equal(basis(),0);
 });
@@ -239,7 +241,7 @@ test('partial forecast coverage leaves the confirmed part; a live warning remove
  const d=await buildDataset(current,[],{generatedAt:iso(t)});
  const fill=extra=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'persistence',sepObservedAt:t,sepBound:false,sepEventProbability:1,sepWarning:false,...extra});};
  const basis=()=>assessV2(current,d).original.confidence.criteria.find(c=>c.id==='forecast');
- fill();assert.equal(basis().score,2);
+ fill();assert.equal(basis().score,4);
  // The horizon ends inside the window: the covered part still counts, so 1 rather than 0.
  fill();for(const p of d.profile.samples)if(p.t>=t+1800000)p.sepEventProbability=null;
  assert.equal(basis().score,1);assert.match(basis().detail,/хвост окна выходит за горизонт/);
@@ -283,25 +285,25 @@ test('a window far from the element epoch lowers freshness and says why',async()
  const near={mode:'history',historyMode:'archive',start:iso(epoch),duration:1,shift:0,cutoff:iso(epoch),lightConstraint:false};
  const far={...near,start:iso(epoch+40*3600000)};
  const at=async r=>{const d=await buildDataset(r,records);return assessV2(r,d).original.confidence.criteria.find(c=>c.id==='freshness');};
- assert.equal((await at(near)).score,4);
+ assert.equal((await at(near)).score,8);
  const stale=await at(far);
- assert.equal(stale.score,3);
+ assert.equal(stale.score,6);
  assert.match(stale.detail,/Орбита распространена на 41 ч/);
 });
 test('a nearly complete window is scored by how much is covered, not dropped to zero',async()=>{
  const d=await buildDataset(request,[]);
  const fill=()=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:0.1,trapped:0,meteor:0,gcr:0.1,ops:0,cutoff:'quiet',sepBasis:'observation',sepBound:false});};
  const cov=()=>{const w=assessV2(request,d).original;return {score:w.confidence.criteria.find(c=>c.id==='coverage').score,status:w.status,coverage:w.factors.sep.coverage};};
- fill();assert.deepEqual(cov(),{score:4,status:'acceptable',coverage:1});
+ fill();assert.deepEqual(cov(),{score:8,status:'acceptable',coverage:1});
  // 97 % of the window measured: the verdict stays «недостаточно данных», the score does not.
  const hole=d.profile.samples.filter(p=>p.t>=t&&p.t<t+3600000).slice(0,3);
  for(const p of hole)p.sep=null;
  const near=cov();
  assert.equal(near.status,'insufficient');assert(near.coverage>0.95&&near.coverage<1);
- assert.equal(near.score,2);
+ assert.equal(near.score,4);
  // Half the window missing is a different statement, and an empty mechanism is still zero.
  fill();for(const p of d.profile.samples.filter((_,i)=>i%2===0))p.sep=null;
- assert.equal(cov().score,1);
+ assert.equal(cov().score,2);
  fill();for(const p of d.profile.samples)p.sep=null;
  assert.equal(cov().score,0);
 });

@@ -1,0 +1,10 @@
+.git
+.env
+.venv
+node_modules
+.npm-cache
+local
+artifacts
+*.zip
+*.tar.gz
+__pycache__

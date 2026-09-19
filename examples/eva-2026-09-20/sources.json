@@ -1,0 +1,279 @@
+[
+  {
+    "id": "noaa.swpc",
+    "name": "GOES SGPS",
+    "url": "https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json",
+    "cadenceMinutes": 5,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Интегральные протоны; публикация неизвестна",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 14.607033333333334,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:56:30.117Z",
+    "version": "f1e9e52115caed20e783b6cf04c66c8cb6dba7e367704f240ba40ed7664fdb88",
+    "provenance": "observation",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "gfz.hp30",
+    "name": "GFZ Hp30",
+    "url": "https://kp.gfz.de/app/json/",
+    "cadenceMinutes": 30,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Hp30; смешанные ревизии, без времени публикации",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 29.607033333333334,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:43:08.660Z",
+    "version": "a94fd0d6d9d25978aa334bb36c1b6208fbae25be0efa21b7329da26f1c3c3676",
+    "provenance": "observation",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "gfz.hp30.forecast",
+    "name": "GFZ Hp30 forecast",
+    "url": "https://spaceweather.gfz.de/fileadmin/SW-Monitor/hp30_product_file_FORECAST_HP30_SWIFT_DRIVEN_LAST.json",
+    "cadenceMinutes": 60,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Ансамблевый прогноз Hp30 на 3 суток; для обрезания берётся максимум ансамбля",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 119.60703333333333,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:24.277Z",
+    "version": "b2a5513b265405e6420a58949f1381173eb99a2b59f1cec9b84dd8d4b2a7acac",
+    "provenance": "external_forecast",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "noaa.swpc.forecast",
+    "name": "NOAA SWPC 3-day forecast",
+    "url": "https://services.swpc.noaa.gov/text/3-day-forecast.txt",
+    "cadenceMinutes": 720,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Вероятность радиационной бури S1+ (≥ 10 pfu при ≥ 10 МэВ) по суткам на 3 суток; время выпуска из заголовка",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 449.60703333333333,
+    "enabled": true,
+    "publishedAt": "2026-09-19T12:30:00.000Z",
+    "lastSuccess": "2026-09-19T19:42:24.229Z",
+    "version": "66e2f859ba8abd0531db3346c4a77c853faeee23454b5335d746dac995d9dc92",
+    "provenance": "external_forecast",
+    "replayEligible": true,
+    "eligible": true
+  },
+  {
+    "id": "noaa.swpc.probabilities",
+    "name": "NOAA SWPC solar probabilities",
+    "url": "https://services.swpc.noaa.gov/json/solar_probabilities.json",
+    "cadenceMinutes": 1440,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Та же вероятность протонного события ≥ 10 МэВ в JSON, 31 сутки истории; время выпуска в продукте не указано — резерв текстового прогноза",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 1199.6070333333332,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:24.230Z",
+    "version": "7911aefab89605f0da396ea3ef4dbc243c8abe03e40c8924bc46f5656357c50f",
+    "provenance": "external_forecast",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "noaa.swpc.alerts",
+    "name": "NOAA SWPC alerts",
+    "url": "https://services.swpc.noaa.gov/products/alerts.json",
+    "cadenceMinutes": 30,
+    "factors": [
+      "sep"
+    ],
+    "detail": "Датированные предупреждения SWPC, окно ~30 суток: WARPX/ALTPX/SUMPX по протонам ≥ 10 и ≥ 100 МэВ со сроком действия",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:24.241Z",
+    "version": "2586b0a5031bab5da9a8a20230d1efaacb9e1820d437dd888e17cb633fe750f0",
+    "provenance": "external_forecast",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "celestrak.gp",
+    "name": "CelesTrak GP",
+    "url": "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=json",
+    "cadenceMinutes": 120,
+    "factors": [
+      "orbit"
+    ],
+    "detail": "NORAD 25544; EPOCH не является публикацией",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 761.9097166666667,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:28.185Z",
+    "version": "5b5baeaec0d90ceba1c64670cc466f545627f30b4c56db41f2e8a4dd3e8d4ff3",
+    "provenance": "model",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "spacetrack.history",
+    "name": "Space-Track GP history",
+    "url": "https://www.space-track.org/",
+    "cadenceMinutes": 480,
+    "factors": [
+      "orbit"
+    ],
+    "detail": "Однократный локальный импорт OMM с CREATION_DATE",
+    "status": "unavailable",
+    "applicable": false,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": null,
+    "version": "unavailable",
+    "provenance": "model",
+    "replayEligible": false,
+    "eligible": false
+  },
+  {
+    "id": "nmdb",
+    "name": "NMDB OULU / ROME",
+    "url": "https://www.nmdb.eu/nest/draw_graph.php",
+    "cadenceMinutes": 60,
+    "factors": [
+      "gcr"
+    ],
+    "detail": "Нейтронные мониторы; фон на Земле, не поток у МКС; NMDB returned no ASCII measurements",
+    "status": "stale",
+    "applicable": true,
+    "ageMinutes": 59.607033333333334,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:43:08.548Z",
+    "version": "d9584969eb51e7edbf957f495d43f0f5f6d6a63f10f8174b1a114da48bb4cec3",
+    "provenance": "observation",
+    "replayEligible": false,
+    "eligible": false
+  },
+  {
+    "id": "celestrak.socrates",
+    "name": "SOCRATES",
+    "url": "https://celestrak.org/SOCRATES/sort-minRange.csv",
+    "cadenceMinutes": 480,
+    "factors": [
+      "ops"
+    ],
+    "detail": "Top-N сближения станции, неполный экран",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": 17.021566666666665,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:35.128Z",
+    "version": "c6588fa8c948c775d9c3536e23444bcb76be67935ad952231c2c642da93e0418",
+    "provenance": "external_forecast",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "nasa.donki",
+    "name": "NASA DONKI",
+    "url": "https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/notifications",
+    "cadenceMinutes": 60,
+    "factors": [],
+    "detail": "Датированные уведомления для сверки",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": "2026-09-19T19:42:33.401Z",
+    "version": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "provenance": "observation",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "noaa.ncei",
+    "name": "NCEI GEOALERT",
+    "url": "https://www.ngdc.noaa.gov/stp/space-weather/swpc-products/daily_reports/geoalerts/",
+    "cadenceMinutes": 1440,
+    "factors": [],
+    "detail": "Оригинальные архивные выпуски; дата выпуска из текста",
+    "status": "unavailable",
+    "applicable": false,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": null,
+    "version": "unavailable",
+    "provenance": "observation",
+    "replayEligible": false,
+    "eligible": false
+  },
+  {
+    "id": "model.irbem",
+    "name": "IGRF / IRBEM / AP-8",
+    "url": "https://spacepy.github.io/autosummary/spacepy.irbempy.html",
+    "cadenceMinutes": 0.5,
+    "factors": [
+      "sep",
+      "trapped"
+    ],
+    "detail": "IGRF-14 internal field; AP8 MIN/MAX >10 MeV",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": null,
+    "lastSuccess": null,
+    "version": "spacepy/0.8.0a0; IGRF-14",
+    "provenance": "model",
+    "replayEligible": false,
+    "eligible": true
+  },
+  {
+    "id": "nasa.meo",
+    "name": "NASA MEO",
+    "url": "https://ntrs.nasa.gov/",
+    "cadenceMinutes": 1440,
+    "factors": [
+      "meteor"
+    ],
+    "detail": "Фон Грюна × граница усиления потоков NASA MEO (data/meteor-showers.json)",
+    "status": "fresh",
+    "applicable": true,
+    "ageMinutes": null,
+    "enabled": true,
+    "publishedAt": "2025-10-17T00:00:00Z",
+    "lastSuccess": null,
+    "version": "NASA MEO LEO forecast 2026 (issued 2025-10-17) + Grün 1985",
+    "provenance": "model",
+    "replayEligible": true,
+    "eligible": true
+  }
+]

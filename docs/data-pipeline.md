@@ -53,8 +53,12 @@ npm run pipeline:import -- records local/goes-records.json
 `fetch` получает источники для периода запроса, затем сохраняет `{dataset,plan}`.
 `build` использует только кэш. Импорт также поддерживает `hp30`, `nmdb`,
 `socrates`, `donki`, `geoalert` и нормализованные `records`.
-Исторические OMM Space-Track загружаются пользователем один раз и импортируются:
-программа не запрашивает пароли и не повторяет ограниченный `gp_history`.
+Исторические OMM Space-Track загружаются пользователем один раз и импортируются.
+Для этого есть явная команда `npm run spacetrack:fetch`: она берёт
+`SPACE_TRACK_IDENTITY` и `SPACE_TRACK_PASSWORD` из `.env` (см. корневой README),
+сохраняет только NORAD 25544 в `local/space-track/gp_history-25544.json`, после
+чего файл импортируется через `npm run pipeline:import -- omm ...`. API не
+запрашивает пароли и не повторяет ограниченный `gp_history` автоматически.
 
 ### Исторический GOES для SEP
 

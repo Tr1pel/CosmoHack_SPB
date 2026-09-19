@@ -27,4 +27,5 @@ http.createServer(async(req,res) => {
     const body = await readFile(path);
     res.writeHead(200,{'Content-Type':types[extname(path)] || 'application/octet-stream','Cache-Control':'no-cache'}); res.end(body);
   } catch(e) { res.writeHead(req.method==='POST'?500:404,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:req.method==='POST'?e.message:'Not found'})); }
-}).listen(Number(process.env.PORT||5173), '127.0.0.1', () => console.log(`Local: http://127.0.0.1:${process.env.PORT||5173}`));
+const port=Number(process.env.PORT||5173),host=process.env.HOST||'127.0.0.1';
+}).listen(port, host, () => console.log(`Local: http://${host}:${port}`));

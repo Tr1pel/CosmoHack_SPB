@@ -11,6 +11,7 @@
     "pipeline:fetch": "node scripts/pipeline.mjs fetch",
     "pipeline:build": "node scripts/pipeline.mjs build",
     "pipeline:import": "node scripts/pipeline.mjs import",
+    "spacetrack:fetch": "node scripts/fetch-spacetrack.mjs",
     "meteor:table": "node scripts/meteor-table.mjs"
   },
   "dependencies": {

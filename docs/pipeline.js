@@ -30,13 +30,13 @@ export function validateV2(data,disabled=[]) {
   return {...data,sources:data.sources.map(s=>({...s,enabled:s.enabled&&!disabled.includes(s.id)}))};
 }
 // Credibility of the window assessment, scored the way NASA-STD-7009 scores a model result:
-// each factor gets 0-4 against stated evidence and the summary score is the MINIMUM of the
+// each factor gets 0-8 against stated evidence and the summary score is the MINIMUM of the
 // factors, so one weak link is never averaged away. As in the standard, the score does not
 // measure safety — it measures how far the answer rests on measurement instead of assumption.
-// 4 measured · 3 measured with a named model caveat · 2 baseline forecast confirmed by an
-// independent issue · 1 unconfirmed forecast or stale data · 0 no evidence for this window.
-export const SCORE_MAX=4;
-export const scoreLevel=score=>score>=3?'high':score===2?'medium':'low';
+// 8 measured · 6 measured with a named model caveat · 4/3/2 confirmed short/medium/long
+// extrapolation · 1 contradicted or partial forecast · 0 no evidence for this window.
+export const SCORE_MAX=8;
+export const scoreLevel=score=>score>=6?'high':score>=4?'medium':'low';
 function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage,decision,step}){
   const name=id=>data.factors.find(f=>f.id===id)?.name??'Орбита',percent=x=>`${Math.round(x*100)} %`,minutes=n=>Math.round(n*step/60),hhmm=t=>new Date(t).toISOString().slice(11,16);
   const criteria=[],add=(id,label,measures,score,detail,hint)=>criteria.push({id,label,measures,score,level:scoreLevel(score),detail,hint:score>=SCORE_MAX?null:hint});
@@ -48,21 +48,21 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
   const worst=missing.length?Math.min(...missing.map(share)):1;
   const gap=minutes(Math.round((1-worst)*points.length));
   add('coverage','Полнота данных','Посчитаны ли решающие механизмы и орбита на всю длительность окна',
-    worst>=1?4:worst>=0.9?2:worst>=0.5?1:0,
+    worst>=1?8:worst>=0.9?4:worst>=0.5?2:0,
     missing.length?`Покрыто не всё окно: ${missing.map(id=>`${name(id)} — ${percent(share(id))}`).join('; ')}. Не оценено около ${gap} мин из ${minutes(points.length)}; окно остаётся «недостаточно данных», потому что отсутствие данных не означает отсутствия риска`:'Солнечные протоны, захваченные частицы, метеороиды и орбита посчитаны на все 100 % окна',
     worst>=0.9?'Пробел короткий: пересчитайте после следующего обновления источников — чаще всего он закрывается сам':'Включите отключённые источники или дождитесь загрузки («Состояние данных»); для исторических дат нужен импорт OMM Space-Track и архива GOES');
   const fresh=(score,detail,hint=null)=>({score,detail,hint});
   const goes=sources.find(s=>s.id==='noaa.swpc');
   let base;
-  if(request.mode!=='current')base=fresh(4,
+  if(request.mode!=='current')base=fresh(8,
     request.historyMode==='replay'?'Replay: взяты только выпуски, опубликованные до момента отсечения, — ровно то, что было известно тогда':'Архивный разбор: наблюдения относятся к самому периоду окна');
   else if(!goes?.enabled||goes.status==='unavailable')base=fresh(0,
     'GOES недоступен или отключён: свежего замера потока протонов нет','Включите источник GOES SGPS и нажмите «Обновить данные»');
   else{
     const age=finite(goes.ageMinutes)?goes.ageMinutes:null,cadence=goes.cadenceMinutes;
-    const score=age===null?1:age<=2*cadence?4:age<=6*cadence?3:1;
+    const score=age===null?2:age<=2*cadence?8:age<=6*cadence?6:2;
     base=fresh(score,
-      age===null?'Возраст последнего замера GOES неизвестен':`Последний замер GOES получен ${Math.round(age)} мин назад при интервале публикации ${cadence} мин — ${score===4?'в пределах двух интервалов':score===3?'дольше двух интервалов, но данные ещё актуальны':'данные устарели'}`,
+      age===null?'Возраст последнего замера GOES неизвестен':`Последний замер GOES получен ${Math.round(age)} мин назад при интервале публикации ${cadence} мин — ${score===8?'в пределах двух интервалов':score===6?'дольше двух интервалов, но данные ещё актуальны':'данные устарели'}`,
       'Нажмите «Обновить данные»: GOES публикует 5-минутные средние с задержкой 10–15 мин');
   }
   // Orbit staleness answers the same question as measurement freshness — how well the data still
@@ -72,11 +72,12 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
   const lead=leads.length?Math.max(...leads):null,warn=data.rules.orbit?.ageWarnHours,cap=data.rules.orbit?.maxPropagationHours;
   const stale=lead!==null&&finite(warn)&&lead>warn;
   add('freshness','Свежесть измерений','Относятся ли данные к рассматриваемому времени и насколько далеко от эпохи распространена орбита',
-    Math.min(base.score,stale?3:4),
+    Math.min(base.score,stale?6:8),
     stale?`${base.detail}. Орбита распространена на ${Math.round(lead)} ч от эпохи элементов${finite(cap)?` при пределе ${cap} ч`:''}: расхождение с точной эфемеридой от этого почти не растёт, но в геомагнитную бурю элементы устаревают быстрее обычного`:base.detail,
-    stale&&base.score>3?'Пересчитайте после следующего выпуска CelesTrak — элементы публикуются каждые 2 часа, и свежая эпоха отодвигает предел распространения':base.hint);
+    stale&&base.score>6?'Пересчитайте после следующего выпуска CelesTrak — элементы публикуются каждые 2 часа, и свежая эпоха отодвигает предел распространения':base.hint);
   const persisted=points.filter(p=>p.sepBasis==='persistence');
-  if(!persisted.length)add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',4,
+  let forecastLeadHours=null;
+  if(!persisted.length)add('forecast','Заблаговременность SEP','Насколько далеко начало окна от последнего наблюдения протонов',8,
     request.mode==='current'?'Окно целиком до последнего замера GOES: поток измерен, прогноз не использовался':'Поток в окне измерен, прогноз не нужен');
   else{
     const since=Math.min(...persisted.map(p=>p.sepObservedAt).filter(finite)),probabilities=persisted.map(p=>p.sepEventProbability);
@@ -84,31 +85,36 @@ function confidenceOf({request,data,sources,points,factors,missing,orbitCoverage
     // Confirmation is graded, not all-or-nothing: a forecast horizon that ends inside the window
     // leaves the tail unconfirmed (1) instead of erasing the confirmation of the rest (0).
     const full=covered.length===probabilities.length,warned=persisted.some(p=>p.sepWarning===true);
-    // Capped at 2 even when SWPC agrees: persistence cannot predict an onset.
-    const score=!covered.length?0:full&&!warned&&finite(limit)&&peak<=limit?2:1;
+    const leadBase=Math.max(...persisted.map(p=>p.sepObservedAt).filter(finite));
+    forecastLeadHours=finite(leadBase)?Math.max(0,(points[0].t-leadBase)/3600000):null;
+    const bands=data.rules.confidence?.sepForecastLeadHours??{shortMax:4,mediumMax:9};
+    // Persistence cannot predict an onset, so even independently confirmed extrapolation is
+    // capped at 4. Distance from the last observation, not a fictitious probability, grades it.
+    const band=!finite(forecastLeadHours)?0:forecastLeadHours<=bands.shortMax?4:forecastLeadHours<=bands.mediumMax?3:2;
+    const score=!covered.length?0:full&&!warned&&finite(limit)&&peak<=limit?band:1;
     const state=!covered.length?'Прогноза SWPC на эти часы нет, подтвердить базовый прогноз нечем'
       :warned?`Действует предупреждение SWPC о протонном событии — базовый прогноз «как сейчас» этим и опровергается${finite(peak)?`; вероятность бури S1+ до ${peak} %`:''}`
       :`SWPC независимо оценивает вероятность бури S1+ до ${peak} %${!full?`, но прогноз покрывает только ${minutes(covered.length)} мин из ${minutes(persisted.length)} — хвост окна выходит за горизонт выпуска`:finite(limit)&&peak<=limit?' — прогноз подтверждён':` — это выше допустимых ${limit} %`}`;
-    add('forecast','Основание оценки SEP','Измерен ли поток на всё окно или часть достроена прогнозом',score,
-      `${minutes(persisted.length)} мин окна после последнего замера GOES${finite(since)?` (${hhmm(since)} UTC)`:''} достроены базовым прогнозом «последнее наблюдение сохраняется». ${state}`,
-      score===2?`Выше 2 из ${SCORE_MAX} такое окно не поднимается: начало события прогноз «как сейчас» не предсказывает (справочник, §6.4). Пересчитайте ближе к выходу — каждый замер GOES сокращает прогнозную часть, а окно целиком в прошлом получает 4`
+    add('forecast','Заблаговременность SEP','Насколько далеко начало окна от последнего наблюдения протонов',score,
+      `${minutes(persisted.length)} мин окна после последнего замера GOES${finite(since)?` (${hhmm(since)} UTC)`:''} достроены базовым прогнозом «последнее наблюдение сохраняется»${finite(forecastLeadHours)?`; заблаговременность начала окна ${forecastLeadHours.toFixed(1)} ч`:''}. ${state}`,
+      score>=2?`Выше 4 из ${SCORE_MAX} экстраполяция не поднимается: начало события прогноз «как сейчас» не предсказывает (справочник, §6.4). Пересчитайте ближе к выходу — каждый замер GOES сокращает ненаблюдаемый промежуток, а окно целиком в прошлом получает 8`
       :warned?'Пока предупреждение в силе, переносить выход в эти часы нельзя обосновать прогнозом: дождитесь SUMPX об окончании события'
       :covered.length?'Возьмите окно ближе к текущему моменту: прогноз SWPC на 3 суток от выпуска, дальше его горизонта подтверждения нет'
       :'Обновите данные: SWPC выпускает прогноз на 3 суток в 00:30 и 12:30 UTC, резервный JSON solar_probabilities — раз в сутки');
   }
   const storm=points.filter(p=>p.cutoff==='storm').length,bounded=points.filter(p=>p.sepBound).length,index=data.rules.cutoff?.storm?.indexThreshold??5;
-  add('model','Применимость моделей','Работают ли модели обрезания и потока в своей области применимости',storm?2:bounded?3:4,
+  add('model','Применимость моделей','Работают ли модели обрезания и потока в своей области применимости',storm?4:bounded?6:8,
     (storm?`Hp30 ≥ ${index} в ${minutes(storm)} мин окна: экран ослаблен, применена эмпирическая параметризация CARI-7A — главная модельная неопределённость SEP`:'Геомагнитно спокойно: обрезание по дипольной формуле Штёрмера, модель в своей области применимости')+(bounded?`; в ${minutes(bounded)} мин поток — оценка сверху (выше 500 МэВ GOES не измеряет), поэтому вывод «ниже порога» от этого только надёжнее`:''),
     storm?'Сравните с окнами вне бури — строка «Геомагнитная буря» в режиме «Обстановка»':'Оценка сверху снимается только измерением спектра выше 500 МэВ; для вывода «ниже порога» она безопасна');
   const gaps=mechanisms.filter(id=>!decision.includes(id)&&factors[id].coverage<1);
   // A context source outside its mode (SOCRATES has no archive) is a declared limit of scope,
-  // not a failure: it caps the score at 3, while a source that should work and does not caps at 2.
+  // not a failure: it caps the score at 6, while a source that should work and does not caps at 4.
   const broken=sources.filter(s=>s.applicable!==false&&(!s.enabled||s.status!=='fresh')&&s.factors?.some(f=>gaps.includes(f)));
-  add('context','Контекст: ГКЛ и сближения','Посчитаны ли механизмы, которые показываются, но выбор окна не блокируют',!gaps.length?4:broken.length?2:3,
+  add('context','Контекст: ГКЛ и сближения','Посчитаны ли механизмы, которые показываются, но выбор окна не блокируют',!gaps.length?8:broken.length?4:6,
     !gaps.length?'Сближения проверены по экрану SOCRATES, фон ГКЛ рассчитан на всё окно':`${gaps.map(id=>`${name(id)} — ${percent(factors[id].coverage)} покрытия`).join('; ')}. ${broken.length?`Источник не отвечает или отключён: ${broken.map(s=>s.name).join(', ')}`:'Это заявленная граница охвата, а не отказ источника: экран SOCRATES существует только в текущем режиме и на 7 суток от своего выпуска'}`,
     broken.length?'Включите источник в разделе «Состояние данных» и обновите данные':'Полное покрытие контекста возможно только в текущем режиме внутри 7 суток от выпуска SOCRATES; на выбор окна это не влияет');
   const score=Math.min(...criteria.map(c=>c.score));
-  return {score,level:scoreLevel(score),limiting:criteria.filter(c=>c.score===score).map(c=>c.id),criteria};
+  return {score,level:scoreLevel(score),limiting:criteria.filter(c=>c.score===score).map(c=>c.id),criteria,forecastLeadHours};
 }
 export function compareVector(a,b){for(let i=0;i<a.length;i++){if(a[i]<b[i])return -1;if(a[i]>b[i])return 1;}return 0;}
 export function assessV2(request,data){

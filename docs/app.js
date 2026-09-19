@@ -80,5 +80,5 @@ function realPage(){const p=state.plan,d=state.data;
   if(state.view==='sources')return pipelineSources(p,d);
   if(state.view==='alerts')return '<div class="alerts-list">'+p.events.map(alertCard).join('')+'</div>';
   if(state.view==='trajectory')return mapPanel(true);
-  const w=selectedWindow();return scenarioStrip()+'<div class="pipeline-stack">'+form(true)+pipelineWindows(p,d,w,state.windowSort,state.windowPane)+pipelineSummary(p,d,w)+pipelineDetails(p,d,w)+(state.view==='history'?pipelineHistory(p,d):mapPanel())+(state.view==='history'?pipelineSources(p,d):'')+'</div>';
+  const w=selectedWindow();return scenarioStrip()+'<div class="pipeline-stack">'+form(true)+pipelineWindows(p,d,w,state.windowSort,state.windowPane)+pipelineSummary(p,d,w)+pipelineDetails(p,d,w)+(p.request.mode==='history'?pipelineHistory(p,d):mapPanel())+(state.view==='history'?pipelineSources(p,d):'')+'</div>';
 }

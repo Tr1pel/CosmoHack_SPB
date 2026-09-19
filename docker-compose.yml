@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-5173}:5173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5173
+      PIPELINE_PYTHON: /opt/venv/bin/python
+      PIPELINE_CACHE: /app/local/pipeline
+      SPACEPY: /app/local/spacepy
+    volumes:
+      - ./local:/app/local
+
+  space-track:
+    build: .
+    profiles: ["archive"]
+    environment:
+      SPACE_TRACK_IDENTITY: ${SPACE_TRACK_IDENTITY:-}
+      SPACE_TRACK_PASSWORD: ${SPACE_TRACK_PASSWORD:-}
+    entrypoint: ["node", "scripts/fetch-spacetrack.mjs"]
+    volumes:
+      - ./local:/app/local
