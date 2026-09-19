@@ -48,7 +48,9 @@ cadenceMinutes, maxAgeMinutes, interpolation, samples. Отсчёт содерж
 Профиль: t, lat/lon (градусы), alt (км), sunlit, orbitSourceId, epoch;
 магнитные поля L, B (нТл), magLat, rc (GV), ec (MeV), cutoff (`quiet|storm`), saa;
 значения sep (pfu), trapped (cm^-2 s^-1), ap8Min/ap8Max, ap8Floor, hp30,
-hp30Forecast, neutronRates (counts/s), gcr и meteor (hits/s). Неизвестное равно null.
+hp30Forecast, neutronRates (counts/s), gcr (доля межпланетного потока ГКЛ выше
+обрезания, 0…1), meteor (hits/s) и ops (число сближений TCA ± 30 мин в экране
+SOCRATES; null вне 7 суток от снимка или без SOCRATES). Неизвестное равно null.
 Отсутствие локальной модели ГКЛ не заменяется наземным счётом NMDB.
 У SEP есть происхождение значения: `sepBasis` (`observation|persistence`),
 `sepObservedAt` — время замера GOES, `sepBound: true` — оценка сверху (энергия
@@ -58,7 +60,10 @@ hp30Forecast, neutronRates (counts/s), gcr и meteor (hits/s). Неизвест�
 `rules.decisionMechanisms` перечисляет механизмы, полнота которых нужна для
 вывода; остальные — контекст (`rules.contextMechanisms`). Если поле отсутствует,
 решают все пять механизмов. Статус механизма в окне:
-`insufficient|review|acceptable|context`.
+`insufficient|review|acceptable|context`; контекстный механизм бывает только
+`review` или `context`. Значение механизма в окне: SEP — pfu·с, захваченные —
+см⁻², метеоры — ожидаемые попадания, ГКЛ — средний % потока, сближения — число
+сближений; при неполном покрытии — null.
 
 Replay производится **до** интерполяции, QA и модели. Записи без publishedAt
 исключены. Ревизия выбирается по максимальному publishedAt <= cutoff;
@@ -66,6 +71,8 @@ fetchedAt используется только для разрешения по
 В archive неизвестные публикации разрешены и обозначены явно.
 
 Результат `computePlan` содержит factors по каждому окну, их coverage/value/peak,
-размерности, status, rank и confidence `{level,reasons}`. Итог outcome:
+размерности, status, rank, position (место в ранжировании) и confidence
+`{level,reasons}`, а также `best` (id показанных лучших окон: до трёх хороших или два
+лучших, если хороших нет) и `goodCount`. Итог outcome:
 `recommendation|no_improvement|insufficient`. Неполные окна никогда не дают
 подтверждённого улучшения. rank служит сравнению, а не скалярной оценкой риска.

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {magneticProfile} from '../pipeline/orbit.mjs';
 const python=process.env.PIPELINE_PYTHON;
 const point=(t,lat=-25,lon=-45)=>({samples:[{t,lat,lon,alt:420}]});
@@ -28,4 +30,8 @@ test('AP-8 below the model floor is zero flux, not an unknown',{skip:!python},as
  // Northern mid-latitude at ISS altitude: B/B0 far inside the loss cone.
  const result=await magneticProfile(point(Date.parse('2024-05-10T10:00:00Z'),45,30),python);
  const [p]=result.samples;assert.equal(p.ap8Min,0);assert.equal(p.ap8Max,0);assert.equal(p.ap8Floor,true);
+});
+test('GOES history reconstruction integrates a power-law spectrum exactly',{skip:!python},()=>{
+ const result=spawnSync(python,[fileURLToPath(new URL('../pipeline/goes_history.py',import.meta.url)),'--selftest'],{encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/"selftest": "ok"/);
 });

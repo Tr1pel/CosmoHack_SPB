@@ -34,10 +34,11 @@ export function assessV2(request,data){
     for(const id of mechanisms){
       const valid=points.filter(p=>finite(p[id])),coverage=valid.length/expected;
       const total=valid.reduce((n,p)=>n+p[id]*step,0),peak=valid.length?Math.max(...valid.map(p=>p[id])):null;
-      const value=coverage===1?total:null,threshold=data.rules[id]?.threshold?.value;
+      const value=coverage!==1?null:id==='ops'?warnings.filter(e=>e.factor==='ops').length:id==='gcr'?100*total/(duration/1000):total,threshold=data.rules[id]?.threshold?.value;
       const flagged=id==='ops'?warnings.some(e=>e.factor==='ops'):id==='meteor'?value!==null&&value>=threshold:peak!==null&&peak>=threshold;
-      const status=decision.includes(id)?(coverage<1?'insufficient':flagged?'review':'acceptable'):(flagged?'review':coverage<1?'context':'acceptable');
-      factors[id]={coverage,value,peak,unit:{sep:'pfu s',trapped:'cm^-2',gcr:'proxy s',meteor:'hits',ops:'conflicts'}[id],status};
+      // Context mechanisms are never green: an empty top-N screen or a GCR proxy proves nothing.
+      const status=decision.includes(id)?(coverage<1?'insufficient':flagged?'review':'acceptable'):(flagged?'review':'context');
+      factors[id]={coverage,value,peak,unit:{sep:'pfu s',trapped:'cm^-2',gcr:'% потока ГКЛ',meteor:'hits',ops:'сближений'}[id],status};
       if(flagged&&id!=='ops')warnings.push({id:`${id}-${i}`,title:data.factors.find(f=>f.id===id).name,type:id.toUpperCase(),factor:id,sourceId:id==='sep'?'noaa.swpc':id==='trapped'?'model.irbem':'nasa.meo',start:t,end,overlapMinutes:duration/60000,value:id==='meteor'?value:peak,unit:data.rules[id].threshold.unit,publishedAt:null,origin:'Расчёт команды',provenance:'own_computation',rule:JSON.stringify(data.rules[id]),version:data.rules.version,limitation:data.rules[id].limitation});
     }
     const missing=decision.filter(id=>factors[id].coverage<1);
@@ -53,15 +54,21 @@ export function assessV2(request,data){
     for(const s of sources.filter(s=>s.applicable!==false&&(!s.enabled||s.status!=='fresh')))reasons.push({code:!s.enabled?'disabled':s.status,detail:`${s.name}: ${s.detail}`});
     if(replay)for(const s of sources.filter(s=>s.applicable!==false&&!s.replayEligible&&!s.id.startsWith('model.')))reasons.push({code:'no_publish',detail:`${s.name}: нет подтверждённого времени публикации`});
     reasons.push({code:'model',detail:'Исследовательские модели и пороги; не вероятность безопасности'});
-    const rank=[missing.length,decision.filter(id=>factors[id].status==='review').length,factors.sep.value??Infinity,saaMinutes??Infinity,warnings.filter(e=>e.factor==='ops').length];
+    // Windows without any flag come first; SEP fluence is compared at a few significant digits so that
+    // persistence noise of 0.1 % does not outrank minutes in the SAA.
+    const digits=data.rules.ranking?.sepSignificantDigits,sep=factors.sep.value===null?Infinity:digits?Number(factors.sep.value.toPrecision(digits)):factors.sep.value;
+    const rank=[missing.length,missing.length||warnings.length?1:0,decision.filter(id=>factors[id].status==='review').length,sep,saaMinutes??Infinity,warnings.filter(e=>e.factor==='ops').length];
     if(request.lightConstraint)rank.push(lightMinutes===null?Infinity:duration/60000-lightMinutes);
     return {id:i===0?'A':`C${i}`,start:t,end,factors,missing,gaps:data.gaps.filter(g=>g.start<end&&g.end>t),warnings,lightMinutes,saaMinutes,rank,confidence:{level:missing.length||persisted.length?'low':'medium',reasons},status:missing.length?'insufficient':warnings.length?'review':'acceptable',incomplete:missing.length>0,weather:missing.some(id=>['sep','trapped','gcr'].includes(id))?'Нет данных':warnings.some(e=>['sep','trapped','gcr'].includes(e.factor))?'Требует проверки':'Низкий прокси',conjunction:factors.ops.coverage<1?'Нет полного экрана':warnings.some(e=>e.factor==='ops')?'Есть пересечение':'Нет пересечений'};
   }
   const candidates=Array.from({length:request.shift+1},(_,i)=>assess(start+i*3600000,i));
   const ranked=[...candidates].sort((a,b)=>compareVector(a.rank,b.rank)||a.start-b.start),recommended=ranked[0];
+  ranked.forEach((w,i)=>{w.position=i+1;});
+  // Best windows: every good one (up to three shown first); without a good window, the two best anyway.
+  const good=ranked.filter(w=>w.status==='acceptable'),best=good.length?good.slice(0,3):ranked.slice(0,2);
   const alternative=recommended.start!==start?recommended:ranked.find(w=>w.start!==start)??null;if(alternative)alternative.id='B';
   const improvement=!recommended.incomplete&&recommended.start!==start&&compareVector(recommended.rank,candidates[0].rank)<0;
   const tied=candidates.length>1&&candidates.every(w=>compareVector(w.rank,recommended.rank)===0);
   const outcome=recommended.incomplete||tied?'insufficient':improvement?'recommendation':'no_improvement';
-  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.0.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
+  return {request:structuredClone(request),generatedAt:data.generatedAt,algorithmVersion:'eva-pipeline/2.1.0',demo:false,cutoff:replay?request.cutoff:null,sources,events:[...new Map([...events,...candidates.flatMap(w=>w.warnings)].map(e=>[e.id,e])).values()],orbit:data.orbit,profile:data.profile,rules:data.rules,original:candidates[0],alternative,recommended,candidates,best:best.map(w=>w.id),goodCount:good.length,improvement,outcome,strictReproducibility:false,limitations:data.limitations};
 }

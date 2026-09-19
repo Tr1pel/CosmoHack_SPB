@@ -138,3 +138,34 @@ test('meteor table is a dated upper bound below the threshold for the longest wi
  const early=await buildDataset({...request,historyMode:'replay',cutoff:'2023-10-01T00:00:00Z'},[]);
  assert(early.profile.samples.every(p=>p.meteor===null));
 });
+test('SOCRATES ignores vehicles docked to the station',()=>{
+ const csv='NORAD_CAT_ID_1,NORAD_CAT_ID_2,TCA,TCA_RANGE,TCA_RELATIVE_SPEED\n25544,100057,2024-05-10 12:00:00,0.006,0.000\n25544,123,2024-05-10 13:00:00,0.8,11.2';
+ const rows=socrates(snap(csv,'celestrak.socrates'));assert.equal(rows.length,1);assert.equal(rows[0].payload.NORAD_CAT_ID_2,'123');
+});
+test('GCR proxy follows the cutoff; SOCRATES coverage spans only its screened days',async()=>{
+ const current={...request,mode:'current'},screened=t+30*60000;
+ const conjunction=socrates({...snap('NORAD_CAT_ID_1,NORAD_CAT_ID_2,TCA,TCA_RANGE,TCA_RELATIVE_SPEED\n25544,123,2024-05-10 11:00:00,0.8,11.2','celestrak.socrates'),fetchedAt:iso(screened)});
+ const index=hp30(snap({datetime:[iso(t-1800000),iso(t)],Hp30:[2,2]},'gfz.hp30'));
+ const modelRunner=async profile=>({samples:profile.samples.filter(p=>p.lat!==null).map(p=>({t:p.t,L:3,B:30000,magLat:55,ap8Min:0,ap8Max:0,ap8Floor:true})),model:'stub',version:'stub'});
+ const d=await buildDataset(current,[...omm(snap([elements],'celestrak.gp')),...conjunction,...index],{modelRunner,generatedAt:iso(t+40*60000),outcomes:[{id:'celestrak.socrates',ok:true,fetchedAt:iso(screened)}]});
+ const at=x=>d.profile.samples.find(p=>p.t===x),rc=cutoffRigidity(55,at(t).alt,2,rules.cutoff).rc;
+ assert(Math.abs(at(t).gcr-(1+rc/rules.gcr.r0GV)**-rules.gcr.gamma)<1e-12);
+ assert.equal(at(t).ops,null);assert.equal(at(t+3600000).ops,1);assert.equal(at(t+7200000).ops,0);
+});
+test('good windows come first; without them the two best are still shown',async()=>{
+ const d=await buildDataset({...request,shift:2},[]);
+ const fill=(sep,trapped)=>{for(const p of d.profile.samples)Object.assign(p,{lat:10,lon:20,alt:420,sunlit:true,saa:false,sep:sep(p.t),trapped:trapped(p.t),meteor:0,gcr:0.1,ops:null});};
+ fill(x=>0.1,x=>x<t+3600000?500:0);
+ let plan=assessV2({...request,shift:2},d);
+ assert(plan.goodCount>0);assert.equal(plan.recommended.status,'acceptable');assert(plan.best.every(id=>plan.candidates.find(w=>w.id===id).status==='acceptable'));
+ assert.equal(plan.recommended.factors.gcr.status,'context');
+ fill(x=>2,x=>0);
+ plan=assessV2({...request,shift:2},d);
+ assert.equal(plan.goodCount,0);assert.equal(plan.best.length,2);assert.deepEqual(plan.candidates.map(w=>w.position).sort(),[1,2,3]);
+});
+test('cache parses each immutable record file once',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'eva-cache-'));
+ try{const c=new Cache(root);await c.append([record()]);let reads=0;const read=c.read.bind(c);c.read=(...a)=>{reads++;return read(...a);};
+  assert.equal((await c.records()).length,1);assert.equal((await c.records()).length,1);assert.equal(reads,1);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
