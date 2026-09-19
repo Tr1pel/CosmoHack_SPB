@@ -43,3 +43,24 @@ export function accessibleFlux(channels,energy){
     return Math.exp(Math.log(a.value)+(Math.log(b.value)-Math.log(a.value))*Math.log(energy/a.energy)/Math.log(b.energy/a.energy));
   }}return null;
 }
+// Above the highest valid channel the integral flux cannot exceed that channel's value
+// (J(>=E) never grows with E): an upper bound, not an extrapolated spectrum.
+export function accessibleFluxBound(channels,energy){
+  const top=channels.filter(c=>Number.isFinite(c.value)).sort((a,b)=>a.energy-b.energy).at(-1);
+  if(!top)return null;
+  if(energy>top.energy)return {value:top.value,bound:true};
+  const value=accessibleFlux(channels,energy);
+  return value===null?null:{value,bound:false};
+}
+export const PROTON_REST_MEV=938.272;
+// Vertical Störmer cutoff, centred dipole: Rc = C·cos⁴λm/(r/R_E)² GV. At Kp >= 5 (Hp30 is its
+// half-hour analogue) the CARI-7A weakening Rc,storm = 0.5·Rc·(1 + 0.54·e^(−Rc/2.9)) applies.
+// Reference: «Внешние опасности и как их измеряют», §2.4 and appendix Б.
+export function cutoffRigidity(magLatDeg,altKm,index,c){
+  if(![magLatDeg,altKm,index].every(Number.isFinite))return null;
+  const r=(c.earthRadiusKm+altKm)/c.earthRadiusKm,quiet=c.coefficientGV*Math.cos(magLatDeg*Math.PI/180)**4/(r*r);
+  if(index<c.storm.indexThreshold)return {rc:quiet,storm:false};
+  return {rc:c.storm.scale*quiet*(1+c.storm.amplitude*Math.exp(-quiet/c.storm.rhoGV)),storm:true};
+}
+// Proton kinetic energy (MeV) for a rigidity in GV: pc = 1000·R MeV.
+export const cutoffEnergy=rcGV=>Math.hypot(1000*rcGV,PROTON_REST_MEV)-PROTON_REST_MEV;

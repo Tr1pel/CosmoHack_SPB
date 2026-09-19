@@ -10,7 +10,8 @@
     "check": "node scripts/check.mjs",
     "pipeline:fetch": "node scripts/pipeline.mjs fetch",
     "pipeline:build": "node scripts/pipeline.mjs build",
-    "pipeline:import": "node scripts/pipeline.mjs import"
+    "pipeline:import": "node scripts/pipeline.mjs import",
+    "meteor:table": "node scripts/meteor-table.mjs"
   },
   "dependencies": {
     "satellite.js": "^7.1.0"

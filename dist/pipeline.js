@@ -7,6 +7,7 @@ export function validateV2(data,disabled=[]) {
   const fail=()=>{throw new Error('Ответ сервера не соответствует контракту v2.');};
   if(data.demo!==false||!Array.isArray(data.sources)||!Array.isArray(data.series)||!Array.isArray(data.factors)||!Array.isArray(data.events)||!Array.isArray(data.gaps)||!Array.isArray(data.profile?.samples)||data.profile.stepSeconds!==30||!data.rules||!Array.isArray(data.limitations))fail();
   for(const id of ['sep','trapped','meteor'])if(!finite(data.rules[id]?.threshold?.value)||data.rules[id].threshold.value<0||data.rules[id].threshold.op!=='>=')fail();
+  if(data.rules.decisionMechanisms!==undefined&&(!Array.isArray(data.rules.decisionMechanisms)||!data.rules.decisionMechanisms.every(id=>mechanisms.includes(id))))fail();
   const ids=data.sources.map(s=>s.id);
   if(new Set(ids).size!==ids.length||!mechanisms.every(id=>data.factors.some(f=>f.id===id)))fail();
   for(const s of data.sources){if(typeof s.id!=='string'||!['fresh','stale','unavailable'].includes(s.status)||typeof s.enabled!=='boolean'||!Array.isArray(s.factors)||!provenance.includes(s.provenance)||!['name','version','detail'].every(k=>typeof s[k]==='string')||!finite(s.cadenceMinutes)||s.cadenceMinutes<=0||(s.publishedAt!==null&&!timestamp(s.publishedAt))||(s.lastSuccess!==null&&!timestamp(s.lastSuccess))||(s.url&&!/^https:\/\//i.test(s.url)))fail();}
@@ -22,6 +23,9 @@ export function compareVector(a,b){for(let i=0;i<a.length;i++){if(a[i]<b[i])retu
 export function assessV2(request,data){
   const start=Date.parse(request.start),duration=request.duration*3600000,step=data.profile.stepSeconds;
   const replay=request.mode==='history'&&request.historyMode==='replay',cutoff=replay?Date.parse(request.cutoff):Infinity;
+  // Mechanisms with thresholds decide. Context mechanisms (GCR, conjunction screening) can never
+  // be fully observed: they are shown and lower confidence but do not block the choice.
+  const decision=data.rules.decisionMechanisms??mechanisms;
   const sources=data.sources.map(s=>({...s,eligible:s.enabled&&s.status==='fresh'}));
   const events=data.events.filter(e=>sources.some(s=>s.id===e.sourceId&&s.enabled)&&(cutoff===Infinity||(e.publishedAt!==null&&Date.parse(e.publishedAt)<=cutoff)));
   function assess(t,i){
@@ -32,21 +36,26 @@ export function assessV2(request,data){
       const total=valid.reduce((n,p)=>n+p[id]*step,0),peak=valid.length?Math.max(...valid.map(p=>p[id])):null;
       const value=coverage===1?total:null,threshold=data.rules[id]?.threshold?.value;
       const flagged=id==='ops'?warnings.some(e=>e.factor==='ops'):id==='meteor'?value!==null&&value>=threshold:peak!==null&&peak>=threshold;
-      factors[id]={coverage,value,peak,unit:{sep:'pfu s',trapped:'cm^-2',gcr:'proxy s',meteor:'hits',ops:'conflicts'}[id],status:coverage<1?'insufficient':flagged?'review':'acceptable'};
+      const status=decision.includes(id)?(coverage<1?'insufficient':flagged?'review':'acceptable'):(flagged?'review':coverage<1?'context':'acceptable');
+      factors[id]={coverage,value,peak,unit:{sep:'pfu s',trapped:'cm^-2',gcr:'proxy s',meteor:'hits',ops:'conflicts'}[id],status};
       if(flagged&&id!=='ops')warnings.push({id:`${id}-${i}`,title:data.factors.find(f=>f.id===id).name,type:id.toUpperCase(),factor:id,sourceId:id==='sep'?'noaa.swpc':id==='trapped'?'model.irbem':'nasa.meo',start:t,end,overlapMinutes:duration/60000,value:id==='meteor'?value:peak,unit:data.rules[id].threshold.unit,publishedAt:null,origin:'Расчёт команды',provenance:'own_computation',rule:JSON.stringify(data.rules[id]),version:data.rules.version,limitation:data.rules[id].limitation});
     }
-    const missing=mechanisms.filter(id=>factors[id].coverage<1);
+    const missing=decision.filter(id=>factors[id].coverage<1);
     const orbitCoverage=points.filter(p=>p.lat!==null).length/expected;
     if(orbitCoverage<1)missing.push('orbit');
     const lightMinutes=points.length===expected&&points.every(p=>typeof p.sunlit==='boolean')?points.filter(p=>p.sunlit).length*step/60:null;
     const saaMinutes=points.length===expected&&points.every(p=>typeof p.saa==='boolean')?points.filter(p=>p.saa).length*step/60:null;
     const reasons=missing.map(id=>({code:'coverage',detail:`${data.factors.find(f=>f.id===id)?.name??'Орбита'}: ${Math.round((factors[id]?.coverage??orbitCoverage)*100)}% покрытия`}));
-    for(const s of sources.filter(s=>!s.enabled||s.status!=='fresh'))reasons.push({code:!s.enabled?'disabled':s.status,detail:`${s.name}: ${s.detail}`});
-    if(replay)for(const s of sources.filter(s=>!s.replayEligible&&!s.id.startsWith('model.')))reasons.push({code:'no_publish',detail:`${s.name}: нет подтверждённого времени публикации`});
+    for(const id of mechanisms.filter(id=>!decision.includes(id)&&factors[id].coverage<1))reasons.push({code:'context',detail:`${data.factors.find(f=>f.id===id)?.name}: контекст, ${Math.round(factors[id].coverage*100)}% покрытия — выбор окна не блокирует`});
+    const persisted=points.filter(p=>p.sepBasis==='persistence'),observed=persisted.map(p=>p.sepObservedAt).filter(finite),bounded=points.filter(p=>p.sepBound).length;
+    if(persisted.length)reasons.push({code:'persistence',detail:`Солнечные протоны: ${Math.round(persisted.length*step/60)} мин окна после последнего замера GOES${observed.length?` (${new Date(Math.min(...observed)).toISOString().slice(11,16)} UTC)`:''} — последнее наблюдение сохраняется; начало события такой прогноз не предсказывает`});
+    if(bounded)reasons.push({code:'bound',detail:`Солнечные протоны: ${Math.round(bounded*step/60)} мин окна — верхняя оценка (обрезание выше последнего канала GOES или неизвестен геомагнитный индекс)`});
+    for(const s of sources.filter(s=>s.applicable!==false&&(!s.enabled||s.status!=='fresh')))reasons.push({code:!s.enabled?'disabled':s.status,detail:`${s.name}: ${s.detail}`});
+    if(replay)for(const s of sources.filter(s=>s.applicable!==false&&!s.replayEligible&&!s.id.startsWith('model.')))reasons.push({code:'no_publish',detail:`${s.name}: нет подтверждённого времени публикации`});
     reasons.push({code:'model',detail:'Исследовательские модели и пороги; не вероятность безопасности'});
-    const rank=[missing.length,mechanisms.filter(id=>factors[id].status==='review').length,factors.sep.value??Infinity,saaMinutes??Infinity,warnings.filter(e=>e.factor==='ops').length];
+    const rank=[missing.length,decision.filter(id=>factors[id].status==='review').length,factors.sep.value??Infinity,saaMinutes??Infinity,warnings.filter(e=>e.factor==='ops').length];
     if(request.lightConstraint)rank.push(lightMinutes===null?Infinity:duration/60000-lightMinutes);
-    return {id:i===0?'A':`C${i}`,start:t,end,factors,missing,gaps:data.gaps.filter(g=>g.start<end&&g.end>t),warnings,lightMinutes,saaMinutes,rank,confidence:{level:missing.length?'low':'medium',reasons},status:missing.length?'insufficient':warnings.length?'review':'acceptable',incomplete:missing.length>0,weather:missing.some(id=>['sep','trapped','gcr'].includes(id))?'Нет данных':warnings.some(e=>['sep','trapped','gcr'].includes(e.factor))?'Требует проверки':'Низкий прокси',conjunction:factors.ops.coverage<1?'Нет полного экрана':warnings.some(e=>e.factor==='ops')?'Есть пересечение':'Нет пересечений'};
+    return {id:i===0?'A':`C${i}`,start:t,end,factors,missing,gaps:data.gaps.filter(g=>g.start<end&&g.end>t),warnings,lightMinutes,saaMinutes,rank,confidence:{level:missing.length||persisted.length?'low':'medium',reasons},status:missing.length?'insufficient':warnings.length?'review':'acceptable',incomplete:missing.length>0,weather:missing.some(id=>['sep','trapped','gcr'].includes(id))?'Нет данных':warnings.some(e=>['sep','trapped','gcr'].includes(e.factor))?'Требует проверки':'Низкий прокси',conjunction:factors.ops.coverage<1?'Нет полного экрана':warnings.some(e=>e.factor==='ops')?'Есть пересечение':'Нет пересечений'};
   }
   const candidates=Array.from({length:request.shift+1},(_,i)=>assess(start+i*3600000,i));
   const ranked=[...candidates].sort((a,b)=>compareVector(a.rank,b.rank)||a.start-b.start),recommended=ranked[0];

@@ -1,10 +1,13 @@
 {
-  "version": "eva-rules/2.0.0",
-  "sep": {"id":"SEP-01","quantity":"accessible_flux","threshold":{"op":">=","value":1,"unit":"pfu"},"windowAggregation":"max","provenance":"own_computation","limitation":"Исследовательский порог, не расчёт дозы экипажа"},
-  "trapped": {"id":"TRAPPED-01","quantity":"ap8_envelope_integral_p10","threshold":{"op":">=","value":100,"unit":"cm^-2 s^-1"},"windowAggregation":"max","provenance":"model","limitation":"Максимум из AP-8 MIN/MAX (фазы солнечного цикла) — климатология, не оперативный прогноз"},
-  "meteor": {"id":"METEOR-01","quantity":"expected_hits","threshold":{"op":">=","value":0.0001,"unit":"hits"},"windowAggregation":"sum","provenance":"own_computation","limitation":"Ожидаемое число пересечений заданной площади, не вероятность травмы"},
+  "version": "eva-rules/2.1.0",
+  "decisionMechanisms": ["sep","trapped","meteor"],
+  "contextMechanisms": ["gcr","ops"],
+  "sep": {"id":"SEP-01","quantity":"accessible_flux","threshold":{"op":">=","value":1,"unit":"pfu"},"windowAggregation":"max","provenance":"own_computation","persistence":{"maxHours":72,"basis":"базовый прогноз «последнее наблюдение сохраняется»"},"limitation":"Исследовательский порог, не расчёт дозы экипажа. Выше последнего канала GOES — верхняя оценка J(≥500 МэВ); после последнего замера — сохранение последнего наблюдения, начало события оно не предсказывает"},
+  "trapped": {"id":"TRAPPED-01","quantity":"ap8_envelope_integral_p10","threshold":{"op":">=","value":100,"unit":"cm^-2 s^-1"},"windowAggregation":"max","provenance":"model","limitation":"Максимум из AP-8 MIN/MAX (фазы солнечного цикла) — климатология, не оперативный прогноз. Ниже 1 см⁻²с⁻¹ (нижний уровень карты AP-8) поток равен 0"},
+  "meteor": {"id":"METEOR-01","quantity":"expected_hits","threshold":{"op":">=","value":0.0001,"unit":"hits"},"windowAggregation":"sum","provenance":"own_computation","limitation":"Ожидаемое число пересечений заданной площади частицами ≥ 3,35·10⁻⁵ г (6,7 Дж по NASA MEO), не вероятность травмы"},
   "suitAreaM2": 1,
-  "suitEnergyMeV": 10,
+  "suitEnergyMeV": 30,
+  "suitEnergyReference": "«Внешние опасности и как их измеряют», табл. 3: протон 30 МэВ пробивает скафандр",
   "saa": {"maxBNt":23000,"maxL":2,"limitation":"Исследовательская граница по B и L; не контур дозы"},
-  "cutoff": {"coefficientGV":14.9,"model":"quiet-Stormer","limitation":"Вертикальное спокойное обрезание 14.9/L^2; при Hp30 >= 5 SEP остаётся unknown без валидированной штормовой модели"}
+  "cutoff": {"model":"stormer-dipole","coefficientGV":14.5,"earthRadiusKm":6371,"storm":{"index":"Hp30","indexThreshold":5,"model":"CARI-7A","scale":0.5,"amplitude":0.54,"rhoGV":2.9},"limitation":"Вертикальное обрезание Штёрмера 14,5·cos⁴λm/(r/R)² (центрированный диполь); при Hp30 ≥ 5 — ослабление экрана по CARI-7A. Разные модели дают заметно разное ослабление, это главная модельная неопределённость SEP"}
 }

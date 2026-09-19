@@ -28,9 +28,12 @@ lightConstraint. Некорректный запрос — HTTP 400; отказ 
 | limitations[] | Ограничения текущей реализации и конкретного расчёта |
 
 Источник имеет id, name, version, detail, factors, enabled,
-status (`fresh|stale|unavailable`), provenance, url (HTTPS), cadenceMinutes,
+status (`fresh|stale|unavailable`), applicable, provenance, url (HTTPS), cadenceMinutes,
 ageMinutes, lastSuccess, publishedAt, replayEligible. Времена неизвестных
 публикаций/загрузок равны **null**, не эпохе Unix и не времени измерения.
+`applicable: false` — источник не даёт данных в этом режиме (например, CelesTrak в
+историческом, Space-Track в текущем). Он не считается сбоем и не входит в «N из M».
+Успешный ответ без записей (DONKI в спокойные дни) — `fresh`.
 
 Ряд: id, sourceId, instrument, quantity, energy, unit, provenance,
 cadenceMinutes, maxAgeMinutes, interpolation, samples. Отсчёт содержит `t`
@@ -43,10 +46,19 @@ cadenceMinutes, maxAgeMinutes, interpolation, samples. Отсчёт содерж
 В реальном ответе не генерируется синтетическая замена отсутствующих данных.
 
 Профиль: t, lat/lon (градусы), alt (км), sunlit, orbitSourceId, epoch;
-магнитные поля L, B (нТл), magLat, rc (GV), ec (MeV), saa;
-значения sep (pfu), trapped (cm^-2 s^-1), ap8Min/ap8Max, hp30,
-neutronRates (counts/s), gcr и meteor (hits/s). Неизвестное равно null.
+магнитные поля L, B (нТл), magLat, rc (GV), ec (MeV), cutoff (`quiet|storm`), saa;
+значения sep (pfu), trapped (cm^-2 s^-1), ap8Min/ap8Max, ap8Floor, hp30,
+hp30Forecast, neutronRates (counts/s), gcr и meteor (hits/s). Неизвестное равно null.
 Отсутствие локальной модели ГКЛ не заменяется наземным счётом NMDB.
+У SEP есть происхождение значения: `sepBasis` (`observation|persistence`),
+`sepObservedAt` — время замера GOES, `sepBound: true` — оценка сверху (энергия
+выше последнего канала или неизвестный индекс). `ap8Floor: true` — AP-8 ниже
+нижнего уровня карты (1 см⁻²с⁻¹), поток 0.
+
+`rules.decisionMechanisms` перечисляет механизмы, полнота которых нужна для
+вывода; остальные — контекст (`rules.contextMechanisms`). Если поле отсутствует,
+решают все пять механизмов. Статус механизма в окне:
+`insufficient|review|acceptable|context`.
 
 Replay производится **до** интерполяции, QA и модели. Записи без publishedAt
 исключены. Ревизия выбирается по максимальному publishedAt <= cutoff;

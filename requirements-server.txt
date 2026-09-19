@@ -1,0 +1,11 @@
+# Server (Linux) scientific dependencies. SpacePy 0.7.0 on PyPI bundles IGRF-13, valid
+# only before 2025.0, so the current mode needs IRBEM 20241214 with IGRF-14 (valid to 2030),
+# which SpacePy has on main since 2025-01-27 but has not released yet. Building it needs
+# gfortran: sudo apt install gfortran python3-dev python3-venv git
+numpy
+scipy
+h5py
+matplotlib
+python-dateutil
+spacepy @ git+https://github.com/spacepy/spacepy@cb983af96e06265dc35463e0d725a11eaf0682a6
+netCDF4==1.7.2
